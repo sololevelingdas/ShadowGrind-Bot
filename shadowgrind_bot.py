@@ -5092,4 +5092,5 @@ async def main():
         await asyncio.sleep(3600) # Sleep for an hour, or adjust as needed
 
 if __name__ == "__main__":
-    asyncio.run(main()) # <--- Run the async main function
+    keep_alive() # Starts the web server for Render
+    asyncio.run(main())
