@@ -1,0 +1,32 @@
+# Use the official Python image as a base. This image already has Python and pip installed.
+# We're using Python 3.11, which is a stable and recent version.
+FROM python:3.11-slim
+
+# Set the working directory inside the container. All subsequent commands will run from here.
+# This helps keep your container organized.
+WORKDIR /app
+
+# Copy the requirements.txt file from your local project into the container's /app directory.
+# We copy this first because if only requirements.txt changes, Docker can use a cached layer,
+# making builds faster.
+COPY requirements.txt .
+
+# Install all the Python dependencies listed in requirements.txt.
+# The --no-cache-dir flag helps keep the image size smaller by not storing package caches.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy all the remaining files from your local project (including your shadowgrind_bot.py, .ogg files,
+# font files, and guild_bg.jpg) into the container's /app directory.
+COPY . .
+
+# Expose port 8080. This tells Docker that the container will listen for incoming network
+# requests on this specific port. Cloud Run expects applications to listen on port 8080.
+EXPOSE 8080
+
+# This is the command that Docker will execute when the container starts.
+# We use Gunicorn to run your bot application. Gunicorn is a Python WSGI HTTP Server,
+# which is perfect for serving webhooks.
+# "--bind 0.0.0.0:8080" tells Gunicorn to listen on all network interfaces on port 8080.
+# "shadowgrind_bot:app" now correctly points to your main script 'shadowgrind_bot.py'
+# and the 'app' object within it.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "shadowgrind_bot:app"]
