@@ -26,14 +26,20 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 
-# --- RENDER 24/7 HEARTBEAT ---
+from flask import Flask
+from threading import Thread
+import os
+
 app = Flask('')
+
 @app.route('/')
 def home():
-    return "ShadowGrind System Online"
+    return "ShadowGrind System Online. Status: S-RANK."
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    # CRITICAL FIX: Tries to get the PORT from the environment, falls back to 8080 if not found
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
@@ -5109,4 +5115,5 @@ async def main():
 
 if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
+
     asyncio.run(main())
