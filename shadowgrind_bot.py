@@ -233,18 +233,16 @@ def leadership_only(func):
 
 #honorrrr
 
-# --- Constants for Honor Code (Premium Version) ---
+# --- Constants for Honor Code (Fixed HTML Version) ---
 HONOR_CODE_TEXT = (
-    "📜 **THE ABYSSAL OATH // HUNTER'S HONOR** 📜\n\n"
+    "<b>📜 THE ABYSSAL OATH // HUNTER'S HONOR 📜</b>\n\n"
     "Before drawing power from the System, swear the Oath. This binds Hunter and Shadow:\n\n"
-    # --- FIX: Added the missing '*' after STEEL ---
-    "1.  **VOW OF STEEL*⚔️\n"
-    # --- END FIX ---
-    "    _Commitment Forged in Shadow._ Missions accepted demand unwavering resolve. Undertake them with purpose; see them through.\n\n"
-    "2.  **ECHO OF TRUTH** 👁️\n"
-    "    _Honesty is the Blade's Edge._ The System perceives all. Submit proof reflecting genuine struggle and true accomplishment. Deception invites weakness.\n\n"
-    "3.  **ASCENSION THROUGH STRIFE** 🔥\n"
-    "    _Failure is but a Sharpening Stone._ Stumble, rise, learn. Persistence carves the path to power. Embrace adversity.\n\n"
+    "1. <b>VOW OF STEEL</b> ⚔️\n"
+    "<i>Commitment Forged in Shadow.</i> Missions accepted demand unwavering resolve. Undertake them with purpose; see them through.\n\n"
+    "2. <b>ECHO OF TRUTH</b> 👁️\n"
+    "<i>Honesty is the Blade's Edge.</i> The System perceives all. Submit proof reflecting genuine struggle and true accomplishment. Deception invites weakness.\n\n"
+    "3. <b>ASCENSION THROUGH STRIFE</b> 🔥\n"
+    "<i>Failure is but a Sharpening Stone.</i> Stumble, rise, learn. Persistence carves the path to power. Embrace adversity.\n\n"
     "Do you swear upon your shadow to uphold this Abyssal Oath?"
 )
 
@@ -4899,16 +4897,34 @@ async def main_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                f"Acknowledge the code...")
             
             try:
-                await update.message.reply_photo(photo=BG_WELCOME_FILE_ID, caption=welcome_caption, parse_mode=ParseMode.MARKDOWN)
+                # 1. Delete the "Processing..." message first
                 await processing_msg.delete()
-                await update.message.reply_text(text=HONOR_CODE_TEXT, reply_markup=HONOR_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+
+                # 2. Send Welcome Photo (Markdown is okay here)
+                await update.message.reply_photo(
+                    photo=BG_WELCOME_FILE_ID, 
+                    caption=welcome_caption, 
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+                # 3. Send Honor Code (MUST BE HTML TO FIX THE ERROR)
+                await update.message.reply_text(
+                    text=HONOR_CODE_TEXT, 
+                    reply_markup=HONOR_KEYBOARD, 
+                    parse_mode=ParseMode.HTML  # <--- CHANGED THIS
+                )
+
             except Exception as e:
                 print(f"Error sending welcome assets: {e}")
-                await processing_msg.edit_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
-                await update.message.reply_text(text=HONOR_CODE_TEXT, reply_markup=HONOR_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+                # Fallback: Send plain text using HTML if photo fails
+                await update.message.reply_text(
+                    text=f"<b>WELCOME, {username}.</b>\n\n{HONOR_CODE_TEXT}", 
+                    reply_markup=HONOR_KEYBOARD,
+                    parse_mode=ParseMode.HTML # <--- CHANGED THIS
+                )
         
         return # Activation handled
-
+        
     elif state == "awaiting_guild_name":
         guild_name = text.replace(".", "").replace("/", "")
         if not (3 <= len(guild_name) <= 25):
@@ -5168,4 +5184,5 @@ async def main():
 
 if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
+
     asyncio.run(main())
