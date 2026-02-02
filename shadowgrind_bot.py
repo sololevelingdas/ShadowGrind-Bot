@@ -3892,30 +3892,58 @@ async def worldboss(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays high-level statistics about the bot."""
-    loading_msg = await update.message.reply_text("Calculating stats...")
+    """Displays high-level statistics (Authorized Personnel Only)."""
+    
+    # --- 🎭 THE ILLUSION CONFIGURATION 🎭 ---
+    # Adjust these numbers to change how big you look
+    
+    # 1. BASE PADDING (The "Ghost" Users)
+    # Even if you have 0 real users, the bot will show this number.
+    FAKE_USER_BASE = 1420
+    FAKE_GUILD_BASE = 12
+    FAKE_MARKET_BASE = 45
+
+    # 2. THE MULTIPLIER (The "Hype" Factor)
+    # For every 1 REAL person who joins, the stat count goes up by this much.
+    # Example: If set to 3, getting 1 real user adds 3 to the total.
+    GROWTH_MULTIPLIER = 4 
+    # ----------------------------------------
+
+    loading_msg = await update.message.reply_text("🔄 Accessing System Core... Calculating Metrics...")
     
     try:
-        # Note: .stream() is fast, but len(list()) can be slow for large dbs.
-        # For a premium bot, this would be replaced with a counter document.
-        users_count = len(list(db.collection("users").stream()))
-        guilds_count = len(list(db.collection("guilds").stream()))
-        market_items_count = len(list(db.collection("market").where(
-            filter=FieldFilter("is_sold", "==", False)
-        ).stream()))
+        # 1. Get Real Data (This costs Firebase reads, be careful with spamming this command)
+        real_users = len(list(db.collection("users").stream()))
+        real_guilds = len(list(db.collection("guilds").stream()))
         
+        # Optimize Market Count: Only count items NOT sold
+        market_query = db.collection("market").where(filter=FieldFilter("is_sold", "==", False)).stream()
+        real_market = len(list(market_query))
+        
+        # 2. Apply The Illusion Math
+        display_users = int((real_users * GROWTH_MULTIPLIER) + FAKE_USER_BASE)
+        display_guilds = int((real_guilds * 2) + FAKE_GUILD_BASE) # Smaller multiplier for guilds looks more realistic
+        display_market = int((real_market * 3) + FAKE_MARKET_BASE)
+
+        # 3. Generate Random "Active Now" (To make it look alive)
+        # Calculates a random number between 10% and 30% of your "Display Users"
+        import random
+        active_now = int(display_users * random.uniform(0.10, 0.30))
+
         text = (
-            f"**ShadowGrind System Stats**\n\n"
-            f"👤 Total Users: `{users_count}`\n"
-            f"🛡️ Total Guilds: `{guilds_count}`\n"
-            f"🛒 Active Market Listings: `{market_items_count}`"
+            f"📊 **SHADOWGRIND SYSTEM METRICS** 📊\n\n"
+            f"👤 **Total Hunters:** `{display_users:,}`\n"
+            f"⚡ **Active Within Hour:** `{active_now:,}`\n"
+            f"🛡️ **Registered Guilds:** `{display_guilds:,}`\n"
+            f"🛒 **Market Listings:** `{display_market:,}`\n\n"
+            f"SYSTEM STATUS: __OPTIMAL__ 🟢"
         )
         
         await loading_msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
         
     except Exception as e:
-        await loading_msg.edit_text(f"Error fetching stats: {e}")
-
+        await loading_msg.edit_text(f"❌ Error calculating stats: {e}")
+        
 @admin_only
 async def view_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and displays a report for a specific user."""
@@ -5186,3 +5214,4 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
