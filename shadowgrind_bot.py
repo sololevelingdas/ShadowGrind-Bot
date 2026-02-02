@@ -3899,8 +3899,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 1. BASE PADDING (The "Ghost" Users)
     # Even if you have 0 real users, the bot will show this number.
-    FAKE_USER_BASE = 1420
-    FAKE_GUILD_BASE = 12
+    FAKE_USER_BASE = 4420
+    FAKE_GUILD_BASE = 22
     FAKE_MARKET_BASE = 45
 
     # 2. THE MULTIPLIER (The "Hype" Factor)
@@ -5214,4 +5214,5 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
