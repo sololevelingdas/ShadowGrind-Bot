@@ -2586,6 +2586,7 @@ async def blackmarket(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             market_text += (
                 f"{rarity_emoji} **{official_name}** `[{item_rarity}]`\n"
+                f"  ID: `{item_doc.id}`\n"  # <--- ADD THIS LINE
                 f"  Seller: @{market_item_data.get('seller_username', 'N/A')}\n"
                 f"  Price: `\u20B9{market_item_data.get('price', '?')}`\n" # Rupee sign ₹
                 f"  To purchase: `/buy \"{official_name}\"`\n\n" # Use official name in buy instruction
@@ -4072,6 +4073,117 @@ async def generate_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @admin_only
+async def finalize_sale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin only: Moves item to buyer and closes the market listing."""
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("❌ Usage: `/finalize_sale @buyer_username listing_id`")
+        return
+
+    buyer_username = context.args[0].replace('@', '').lower()
+    listing_id = context.args[1]
+
+    # 1. Fetch Listing
+    market_ref = db.collection("market").document(listing_id)
+    listing = market_ref.get()
+
+    if not listing.exists:
+        await update.message.reply_text("❌ Listing ID not found.")
+        return
+
+    market_data = listing.to_dict()
+    if market_data.get("is_sold"):
+        await update.message.reply_text("⚠️ This item is already marked as SOLD.")
+        return
+
+    item_name = market_data.get("item_name")
+    seller_id = market_data.get("seller_id")
+
+    # 2. Find Buyer
+    buyer_doc = await find_user_by_username(buyer_username)
+    if not buyer_doc:
+        await update.message.reply_text(f"❌ Buyer @{buyer_username} not found.")
+        return
+
+    buyer_id = buyer_doc.id
+
+    # 3. Database Transaction
+    try:
+        # Give item to buyer
+        db.collection("users").document(buyer_id).update({
+            f"inventory.{item_name}": firestore.Increment(1)
+        })
+
+        # Mark listing as SOLD (it will now disappear from /blackmarket)
+        market_ref.update({
+            "is_sold": True, 
+            "sold_at": firestore.SERVER_TIMESTAMP, 
+            "buyer_id": buyer_id
+        })
+
+        await update.message.reply_text(
+            f"✅ **SALE FINALIZED**\n\n"
+            f"Item: `{item_name}`\n"
+            f"Buyer: @{buyer_username}\n"
+            f"Listing `{listing_id}` is now CLOSED."
+        )
+
+        # Notify Buyer
+        try:
+            await context.bot.send_message(
+                chat_id=buyer_id, 
+                text=f"📦 **PACKAGE RECEIVED**\n\nYour purchase of `{item_name}` is verified. It has been added to your inventory."
+            )
+        except: pass
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Transaction failed: {e}")
+
+
+
+@check_active_status
+async def cancel_sale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows a seller to remove their own listing and get their item back."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/cancel_sale listing_id` (Find ID in `/blackmarket`)")
+        return
+
+    listing_id = context.args[0]
+    user_id = str(update.effective_user.id)
+    
+    market_ref = db.collection("market").document(listing_id)
+    listing = market_ref.get()
+
+    if not listing.exists:
+        await update.message.reply_text("❌ Listing not found.")
+        return
+
+    data = listing.to_dict()
+    if data.get("seller_id") != user_id:
+        await update.message.reply_text("🚫 You can only cancel your own listings.")
+        return
+
+    if data.get("is_sold"):
+        await update.message.reply_text("⚠️ This item has already been sold and cannot be cancelled.")
+        return
+
+    # Return item to user and delete listing
+    item_name = data.get("item_name")
+    db.collection("users").document(user_id).update({
+        f"inventory.{item_name}": firestore.Increment(1)
+    })
+    market_ref.delete()
+
+    await update.message.reply_text(f"✅ Listing cancelled. `{item_name}` has been returned to your inventory.")
+
+
+
+
+
+
+
+
+
+@admin_only
 async def extend_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Extends a user's subscription by a number of days."""
     try:
@@ -5137,6 +5249,9 @@ async def main():
     app.add_handler(CommandHandler("buy", buy))
     app.add_handler(CommandHandler("what", what))
     app.add_handler(CommandHandler("blackmarket", blackmarket))
+    app.add_handler(CommandHandler("finalize_sale", finalize_sale))
+    app.add_handler(CommandHandler("cancel_sale", cancel_sale))
+    
 
     # Shadow Regiment commands
     app.add_handler(CommandHandler("regiment", regiment))
@@ -5214,5 +5329,6 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
