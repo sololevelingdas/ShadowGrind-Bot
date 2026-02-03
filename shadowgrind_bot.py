@@ -423,6 +423,19 @@ MAIN_REPLY_KEYBOARD_LAYOUT = [
 MAIN_REPLY_MARKUP = ReplyKeyboardMarkup(MAIN_REPLY_KEYBOARD_LAYOUT, resize_keyboard=True)
 
 
+async def send_mission_lore(update, context, mission_data):
+    """Separate helper to send the lore text bubble."""
+    message = update.message or update.callback_query.message
+    lore_text = (
+        f"\U0001f4e9 **SYSTEM MEMO // MISSION LORE**\n"
+        f"----------------------------\n"
+        f"_{mission_data.get('description', 'The System provides no context.')}_\n"
+        f"----------------------------"
+    )
+    await context.bot.send_message(chat_id=message.chat_id, text=lore_text, parse_mode=ParseMode.MARKDOWN)
+
+
+
 
 # --- (Add these in your CONFIGURATION section) ---
 
@@ -1757,9 +1770,12 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         ## --- THE FIX IS HERE --- ##
-        # Using 'with open' ensures the file is closed automatically
+        # ... inside your try block ...
         with open(card_path, "rb") as photo:
             await message.reply_photo(photo=photo, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
+        
+        # ADD THIS ONE LINE HERE:
+        await send_mission_lore(update, context, mission_data)
 
     except Exception as e:
         print(f"Error generating or sending mission card: {e}")
@@ -5329,6 +5345,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
