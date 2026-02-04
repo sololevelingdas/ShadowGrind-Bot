@@ -531,6 +531,46 @@ def get_rank_sort_value(rank):
     return ranks.get(str(rank).upper(), 10)
 
 
+
+
+
+async def trigger_audit(update, context, user_data, mission_data, minutes, reason_tag):
+    """Sends the user's proof to the Admin for manual review."""
+    user_id = str(update.effective_user.id)
+    username = user_data.get("player_name", "Unknown")
+    mission_title = mission_data.get("title", "Unknown Mission")
+    mission_log = " ".join(context.args)
+
+    # 1. Notify User (The "Fear" Message)
+    await update.message.reply_text(
+        "⚠️ **SYSTEM ALERT: MANUAL AUDIT TRIGGERED** ⚠️\n\n"
+        "Your performance metrics have flagged this submission for review.\n"
+        "The Monarch will personally verify your proof.\n\n"
+        "__XP withheld pending approval.__",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    # 2. Send to Admin (You)
+    audit_keyboard = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"audit_pass_{user_id}"),
+            InlineKeyboardButton("⚡ PUNISH (-50 XP)", callback_data=f"audit_fail_{user_id}")
+        ]
+    ]
+    
+    await context.bot.send_message(
+        chat_id=ADMIN_USER_ID,
+        text=f"🕵️ **AUDIT TRAP TRIGGERED**\n\n"
+             f"**Reason:** `{reason_tag}`\n"
+             f"**Hunter:** @{username}\n"
+             f"**Mission:** {mission_title}\n"
+             f"**Time:** {int(minutes)} minutes\n"
+             f"**Proof:** _{mission_log}_\n\n"
+             f"Decide their fate.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(audit_keyboard)
+    )
+
 # --- (Add these to your HELPER FUNCTIONS section) ---
 
 def generate_main_menu_keyboard():
@@ -1744,9 +1784,13 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mission_doc = random.choice(all_missions)
     mission_data = mission_doc.to_dict()
-    # Add difficulty and type to the data for the card generator
+    
+    # --- [UPDATE FOR ANTI-CHEAT START] ---
+    # Add difficulty, type, AND the start time
     mission_data["difficulty"] = difficulty
     mission_data["type"] = mtype
+    mission_data["started_at"] = datetime.now(timezone.utc) # <--- THIS IS THE NEW LINE REQUIRED
+    # --- [UPDATE END] ---
     
     user_ref.update({"current_mission": mission_data})
 
@@ -1770,7 +1814,6 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         ## --- THE FIX IS HERE --- ##
-        # ... inside your try block ...
         with open(card_path, "rb") as photo:
             await message.reply_photo(photo=photo, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
         
@@ -1779,7 +1822,6 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         print(f"Error generating or sending mission card: {e}")
-        # The 'finally' block will still run even if there's an error
     finally:
         if card_path and os.path.exists(card_path):
             os.remove(card_path)
@@ -1792,7 +1834,6 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Delete the "Deploying..." message for a clean chat
     await progress_msg.delete()
-
 
 
 @check_active_status
@@ -1914,6 +1955,7 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_data = user_doc.to_dict()
     
+    # --- 1. EXISTING RANK UP LOGIC (Preserved) ---
     if user_data.get("state") == "in_rank_up_trial":
         mission_log = " ".join(context.args)
         if not mission_log:
@@ -1927,6 +1969,46 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ No active mission. Type `/mission` to begin.")
         return
 
+    # --- 🛡️ NEW: TIME CALCULATION START 🛡️ ---
+    started_at = current_mission_data.get("started_at")
+    minutes_passed = 999 # Safe default if legacy mission (no timer)
+
+    if started_at:
+        # Convert Firestore timestamp to Python datetime if needed
+        if isinstance(started_at, datetime):
+            start_time = started_at
+        else:
+            start_time = datetime.now(timezone.utc)
+
+        # Ensure timezone awareness
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+
+        time_elapsed = datetime.now(timezone.utc) - start_time
+        minutes_passed = time_elapsed.total_seconds() / 60
+
+    # --- 🚨 LAYER 1: THE SPEED TRAP (< 5 Mins) ---
+    # Suspiciously fast? Send straight to Audit without blocking.
+    if minutes_passed < 5:
+        # Pass the minutes_passed to the helper so the Admin sees "Time: 2 mins"
+        await trigger_audit(update, context, user_data, current_mission_data, minutes_passed, "🚀 IMPOSSIBLE SPEED")
+        return
+
+    # --- 🛡️ LAYER 2: THE TIME GATE (5 - 20 Mins) ---
+    # Fast but not instant? Block them until 20 mins.
+    MIN_REQUIRED_MINUTES = 20
+    if minutes_passed < MIN_REQUIRED_MINUTES:
+        time_left = int(MIN_REQUIRED_MINUTES - minutes_passed) + 1
+        await update.message.reply_text(
+            f"🚫 **SYSTEM DENIAL: TIMELOCK ACTIVE**\n\n"
+            f"The System mandates a minimum of `{MIN_REQUIRED_MINUTES}` minutes for this protocol.\n"
+            f"You returned in `{int(minutes_passed)}` minutes.\n\n"
+            f"⏳ **Try again in `{time_left}` minutes.**",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    # --- 🛡️ TIME CHECK END 🛡️ ---
+
     proof_type = current_mission_data.get("proof_type", "log")
     
     if proof_type == "log":
@@ -1934,7 +2016,15 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not mission_log:
             await update.message.reply_text("❌ **PROOF REQUIRED**\n*Usage:* `/complete <your summary>`", parse_mode=ParseMode.MARKDOWN)
             return
+        
+        # --- 👁️ LAYER 3: RANDOM AUDIT (20% Chance) ---
+        if random.random() < 0.20:
+            await trigger_audit(update, context, user_data, current_mission_data, minutes_passed, "🎲 RANDOM CHECK")
+            return
+        # ---------------------------------------------
+
         await process_mission_completion(update, context, user_ref, user_data, current_mission_data, proof_data=mission_log)
+    
     elif proof_type == "photo":
         user_ref.update({"state": "awaiting_photo_proof"})
         await update.message.reply_text("📸 **PHOTO PROOF REQUIRED**\nPlease send the image now.", parse_mode=ParseMode.MARKDOWN)
@@ -4811,6 +4901,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              await query.edit_message_text("Error processing selection. Please try again.")
         # No return needed here as it's handled
 
+    # ... inside button_handler ...
+
+    # --- AUDIT: PASS ---
+    elif data.startswith("audit_pass_"):
+        target_user_id = data.split("_")[2]
+        target_ref = db.collection("users").document(target_user_id)
+        target_doc = target_ref.get()
+        
+        if target_doc.exists:
+            mission_data = target_doc.to_dict().get("current_mission")
+            if mission_data:
+                # Give Rewards (Manual calculation for simplicity)
+                xp = mission_data.get("xp", 0)
+                target_ref.update({"xp": firestore.Increment(xp), "current_mission": firestore.DELETE_FIELD})
+                
+                await context.bot.send_message(target_user_id, "✅ **AUDIT CLEARED.** XP Awarded.")
+                await query.edit_message_text(f"✅ User {target_user_id} Approved.")
+            else:
+                await query.edit_message_text("❌ Error: User has no active mission.")
+
+    # --- AUDIT: FAIL ---
+    elif data.startswith("audit_fail_"):
+        target_user_id = data.split("_")[2]
+        target_ref = db.collection("users").document(target_user_id)
+        
+        # Punish
+        target_ref.update({"current_mission": firestore.DELETE_FIELD, "xp": firestore.Increment(-50)})
+        
+        await context.bot.send_message(target_user_id, "🚫 **AUDIT FAILED.** Deception detected. **-50 XP** penalty applied.")
+        await query.edit_message_text(f"⚡ User {target_user_id} Punished.")
+
     # --- Handle Honor Code ---
     elif data == "honor_accept":
         user_ref = db.collection("users").document(user_id)
@@ -5345,6 +5466,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
