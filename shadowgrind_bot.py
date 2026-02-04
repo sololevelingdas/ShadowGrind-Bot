@@ -353,6 +353,16 @@ CONSUMABLE_EFFECTS = {
         "duration_minutes": 120,
         "desc": "Sustained energy. +10% Loot Drop Chance for 2 hours."
     },
+    # ... inside CONSUMABLE_EFFECTS = { ...
+
+    # --- SPECIAL LONG-TERM BUFFS ---
+    "monarchs_decree": {
+        "name": "Monarch's Decree",
+        "type": "xp_boost",
+        "value": 2.0,           # 2x Multiplier (Double XP)
+        "duration_minutes": 10080, # 7 Days (7 * 24 * 60)
+        "desc": "Absolute Authority. Grants 2x XP for 7 Days."
+    },
     
     # --- SPECIAL (Phoenix Down) ---
     "phoenix_down": {
@@ -5466,6 +5476,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
