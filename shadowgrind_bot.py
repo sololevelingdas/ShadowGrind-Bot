@@ -1054,14 +1054,40 @@ async def level_up_guild(guild_ref, guild_data, context):
 
 # --- (Add these to your HELPER FUNCTIONS section) ---
 
-async def find_user_by_username(username: str):
-    """Fetches a user document from Firestore by their username."""
-    username_lower = username.replace("@", "").strip().lower()
-    users_query = db.collection("users").where(
-        filter=FieldFilter("username", "==", username_lower)
+async def find_user_by_username(search_term: str):
+    """
+    Smart Search: Looks for a user by Player Name OR Telegram Username OR User ID.
+    """
+    clean_term = search_term.replace("@", "").strip()
+    clean_term_lower = clean_term.lower()
+    
+    # 1. Try searching by "Player Name" (the 'username' field in DB)
+    # This matches the name they chose during onboarding
+    query_1 = db.collection("users").where(
+        filter=FieldFilter("username", "==", clean_term_lower)
     ).limit(1).stream()
-    user_doc = next(users_query, None)
-    return user_doc # Will be None if not found
+    result = next(query_1, None)
+    
+    if result:
+        return result
+
+    # 2. If not found, try searching by Telegram Username ('username_initial')
+    # This matches their actual @TelegramHandle
+    query_2 = db.collection("users").where(
+        filter=FieldFilter("username_initial", "==", clean_term) 
+    ).limit(1).stream()
+    result = next(query_2, None)
+    
+    if result:
+        return result
+
+    # 3. If input is a number, try searching by Telegram User ID
+    if clean_term.isdigit():
+        doc = db.collection("users").document(clean_term).get()
+        if doc.exists:
+            return doc
+
+    return None
 
 async def find_item_by_name(item_name: str):
     """Fetches an item's data from the 'items' collection by its name."""
@@ -4068,21 +4094,26 @@ async def view_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: `/view_user @username`")
         return
         
+    # This calls the smart helper we defined above
     user_doc = await find_user_by_username(context.args[0])
+    
     if not user_doc:
-        await update.message.reply_text("User not found.")
+        await update.message.reply_text("❌ User not found. (Checked Player Name, @Handle, and ID)")
         return
         
     user_data = user_doc.to_dict()
     
+    # Formatting Expiry
     expires_at = user_data.get("expires_at", "N/A")
     if isinstance(expires_at, datetime):
         expires_at_str = expires_at.strftime("%Y-%m-%d %H:%M UTC")
     else:
         expires_at_str = str(expires_at)
         
+    # --- REPORT TEXT ---
     text = (
-        f"**User Report: @{user_data.get('username')}**\n\n"
+        f"**User Report**\n\n"
+        f"**Telegram Handle:** `@{user_data.get('username_initial', 'N/A')}`\n" # <--- NEW: Shows real @handle
         f"**Telegram ID:** `{user_doc.id}`\n"
         f"**Player Name:** `{user_data.get('player_name', 'N/A')}`\n"
         f"**Real Name:** `{user_data.get('real_name', 'N/A')}`\n"
@@ -5476,6 +5507,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
