@@ -259,7 +259,12 @@ load_dotenv()
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "1419440031") # Your Admin Telegram User ID
 bot_token = os.getenv("BOT_TOKEN")
 
-XP_PER_LEVEL = 1000
+XP_REQ_E = 1000   # Lv 1-9
+XP_REQ_D = 2000   # Lv 10-24 (Doubled)
+XP_REQ_C = 4000   # Lv 25-44 (Doubled)
+XP_REQ_B = 8000   # Lv 45-69 (Doubled)
+XP_REQ_A = 16000  # Lv 70-99 (Doubled)
+XP_REQ_S = 32000  # Lv 100+  (Doubled)
 FONT_FILE_REGULAR = "Exo2-Regular.ttf"
 FONT_FILE_BOLD = "Exo2-Bold.ttf"
 MIN_RANK_TO_CREATE_GUILD = "D"
@@ -700,6 +705,67 @@ def generate_explanation_keyboard(back_target: str):
     # back_target should be like 'menu_main' or 'menu_category_core'
     keyboard = [ [InlineKeyboardButton("< Back", callback_data=back_target)] ]
     return InlineKeyboardMarkup(keyboard)
+
+# --- HELPER FUNCTIONS ---
+def get_rank_sort_value(rank):
+    """Converts a rank string to a sortable numerical value (lower is better)."""
+    ranks = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
+    return ranks.get(str(rank).upper(), 10)
+
+# --- PASTE THE 3 FUNCTIONS HERE ---
+
+def get_xp_req_for_level(level):
+    """Returns the XP needed to complete the current level."""
+    if level < 10: return XP_REQ_E
+    if level < 25: return XP_REQ_D
+    if level < 45: return XP_REQ_C
+    if level < 70: return XP_REQ_B
+    if level < 100: return XP_REQ_A
+    return XP_REQ_S
+
+def calculate_level_from_xp(total_xp):
+    """Calculates level based on the Rank Thresholds."""
+    # Tier 1: E-Rank (Lv 1-9) | Cap: 9,000 XP
+    if total_xp < 9000:
+        return (total_xp // XP_REQ_E) + 1
+    
+    # Tier 2: D-Rank (Lv 10-24) | Cap: 9,000 + (15*2000) = 39,000 XP
+    if total_xp < 39000:
+        remaining = total_xp - 9000
+        return 10 + (remaining // XP_REQ_D)
+
+    # Tier 3: C-Rank (Lv 25-44) | Cap: 39,000 + (20*4000) = 119,000 XP
+    if total_xp < 119000:
+        remaining = total_xp - 39000
+        return 25 + (remaining // XP_REQ_C)
+
+    # Tier 4: B-Rank (Lv 45-69) | Cap: 119,000 + (25*8000) = 319,000 XP
+    if total_xp < 319000:
+        remaining = total_xp - 119000
+        return 45 + (remaining // XP_REQ_B)
+
+    # Tier 5: A-Rank (Lv 70-99) | Cap: 319,000 + (30*16000) = 799,000 XP
+    if total_xp < 799000:
+        remaining = total_xp - 319000
+        return 70 + (remaining // XP_REQ_A)
+
+    # Tier 6: S-Rank+
+    remaining = total_xp - 799000
+    return 100 + (remaining // XP_REQ_S)
+
+def get_level_start_xp(level):
+    """Returns the Total XP required to REACH the start of this level."""
+    if level <= 1: return 0
+    if level <= 10: return (level - 1) * XP_REQ_E
+    if level <= 25: return 9000 + (level - 10) * XP_REQ_D
+    if level <= 45: return 39000 + (level - 25) * XP_REQ_C
+    if level <= 70: return 119000 + (level - 45) * XP_REQ_B
+    if level <= 100: return 319000 + (level - 70) * XP_REQ_A
+    return 799000 + (level - 100) * XP_REQ_S
+
+# ----------------------------------
+
+# ... other helper functions follow ...
 
 
 
@@ -2082,6 +2148,24 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     xp_reward = mission_data.get("xp", 0)
     perk_reward = mission_data.get("perks", [])
     
+    # ======================================================
+    # [NEW CODE START] - D-RANK XP NERF (MAX 100 XP)
+    # ======================================================
+    current_level = user_data.get("level", 1)
+    original_base_xp = xp_reward
+    summary_text = f"Objective **'{mission_title}'** complete."
+
+    # If Level is 10 or higher (D-Rank+), Cap Base XP at 100
+    if current_level >= 10:
+        # The Nerf: Even if mission gives 1000, we make it 100.
+        xp_reward = min(xp_reward, 100)
+        
+        if original_base_xp > 100:
+            summary_text += "\n📉 _Rank Penalty Applied: XP capped at 100._"
+    # ======================================================
+    # [NEW CODE END]
+    # ======================================================
+
     # --- 1. BONUS CALCULATION (Guild Perks + Active Items) ---
     guild_id = user_data.get("guild_id")
     guild_perk_effects = []
@@ -2116,9 +2200,7 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
             xp_boost_total *= float(xp_effect.get("value", 1.0))
             item_boost_active = True
         else:
-            # Cleanup expired effect (optional, or let it sit until next cleanup)
             pass
-# ... (After Part B: Active Item Effects) ...
 
     # C. Loadout (Equipment) Bonuses [NEW]
     loadout = user_data.get("loadout", {})
@@ -2127,34 +2209,41 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
         if stats and stats.get("bonus_type") == "xp":
             xp_boost_total += stats.get("value", 0.0)
             
-    # Apply Total Boost
-    # ... (rest of logic) ...
-
-    # Apply Total Boost
+    # Apply Total Boost (Boosts apply AFTER the 100 XP Cap)
     original_xp = xp_reward
     xp_reward = int(xp_reward * xp_boost_total)
 
     # -- Summary Text Update --
-    summary_text = f"Objective **'{mission_title}'** complete."
-    
     if xp_boost_total > 1.0:
         summary_text += f"\n⚡ **XP Boosted!** ({int(xp_boost_total*100 - 100)}% Bonus)"
         if item_boost_active:
             summary_text += f"\n   _(Effect: {xp_effect['source']} active)_"
 
     previous_level = user_data.get("level", 1)
-    # Calculate new XP total *before* updating DB
-    current_xp = user_data.get("xp", 0)
-    new_total_xp = current_xp + xp_reward
-    new_level = (new_total_xp // XP_PER_LEVEL) + 1 # Calculate level based on new total
     
-    summary_text = f"Objective **'{mission_title}'** complete."
+    # Calculate new XP total *before* updating DB
+    current_total_xp = user_data.get("xp", 0)
+    new_total_xp = current_total_xp + xp_reward
+    
+    # ======================================================
+    # [NEW CODE START] - USE NEW TIERED LEVELING MATH
+    # ======================================================
+    # Replaced simple division with the smart calculator
+    new_level = calculate_level_from_xp(new_total_xp)
+    # ======================================================
+    # [NEW CODE END]
+    # ======================================================
+    
     if xp_boost_total > 1.0:
             summary_text += f"\n_Guild Perk Bonus: +{xp_reward - original_xp} XP_"
         
     level_up_occurred = new_level > previous_level
     if level_up_occurred:
         summary_text += f"\n\n**LEVEL UP!** You have ascended to Level {new_level}."
+        
+        # Add warning if they just hit D-Rank
+        if new_level == 10:
+            summary_text += "\n\n⚠️ **WARNING: D-RANK REACHED**\nXP Requirement doubled to 2000.\nMission rewards are now capped at 100 XP."
 
     # --- 2. USER DATABASE UPDATE ---
     # Update with the new calculated level and increment XP
@@ -2245,7 +2334,6 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     if not new_loot:
         summary_text += "\n\n😢 No drop this time. Better luck next time!"
         
-    # --- 4. GUILD XP CONTRIBUTION ---
     # --- 4. GUILD XP CONTRIBUTION ---
     guild_data = None
     if guild_ref:
@@ -2444,8 +2532,9 @@ async def process_rank_up_completion(update: Update, context: ContextTypes.DEFAU
 
 @check_active_status
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the user's premium ID card and stats."""
-    message = update.message or update.callback_query.message
+    """Displays the user's premium ID card and stats with Tiered Leveling."""
+    # 1. Use effective_message to prevent crashes on edits
+    message = update.effective_message 
     user_id = str(update.effective_user.id)
     loading_message = await message.reply_text("🧠 Accessing Hunter Database...")
 
@@ -2457,48 +2546,58 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_data = user_doc.to_dict()
-    # [NEW] Ensure telegram_id is in the data for the card
     user_data["telegram_id"] = user_id 
 
     await loading_message.edit_text("📊 Compiling Hunter Record... Generating ID...")
 
-    # --- Extract Data for CAPTION ---
-    # The card will show: Name, Rank, Level, UserID, Join Date, Guild, Aim
-    # The caption will show: XP, Contract Status, Assets
+    # ======================================================
+    # [NEW CODE START] - DYNAMIC XP CALCULATION
+    # ======================================================
+    current_xp = user_data.get("xp", 0)
+    level = user_data.get("level", 1)
     
-    xp = user_data.get("xp", 0)
-    level = user_data.get("level", 1) # Get level for caption
-    xp_current_level_progress = xp % XP_PER_LEVEL
-    xp_to_next = XP_PER_LEVEL - xp_current_level_progress
+    # 1. How much XP does THIS specific level need? (1000, 2000, 4000...)
+    xp_req_for_next = get_xp_req_for_level(level)
+    
+    # 2. How much total XP did it take to reach the start of this level?
+    xp_at_start_of_level = get_level_start_xp(level)
+    
+    # 3. Current progress into this level (e.g. 150 XP into Level 10)
+    xp_progress = current_xp - xp_at_start_of_level
+    
+    # 4. Remaining XP needed
+    xp_to_next = xp_req_for_next - xp_progress
+    # ======================================================
+    # [NEW CODE END]
+    # ======================================================
 
-    # --- CORRECTED expires_at HANDLING ---
-    expires_at = user_data.get("expires_at") 
-    expiry_status = "`Unknown`" 
+    # --- Formatting Expiry ---
+    expires_at = user_data.get("expires_at")
+    expiry_status = "`Unknown`"
     if isinstance(expires_at, datetime):
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         days_left = (expires_at - datetime.now(timezone.utc)).days
         expiry_status = f"`{days_left}` days remaining" if days_left >= 0 else "`Expired`"
     elif expires_at:
-        print(f"Warning: 'expires_at' for user {user_id} is not a datetime object: {type(expires_at)}")
-    # --- End of Correction ---
+        # Fallback if expiry is not a datetime object
+        expiry_status = str(expires_at)
 
     total_items = sum(count for count in user_data.get("inventory", {}).values() if count > 0)
     
-    # [NEW] Fetch shadow count
     try:
         shadows_count = len(list(user_ref.collection("shadows").stream()))
-    except Exception as e:
-        print(f"Error fetching shadow count: {e}")
+    except:
         shadows_count = 0
 
-    # --- Construct Caption Text ---
+    # --- Updated Caption with New Variables ---
     profile_caption = (
         f"**📊 SYSTEM STATS & ASSETS**\n\n"
         f"**Progression**\n"
         f"> 🏆 Level: `{level}`\n"
-        f"> ✨ XP: `{xp_current_level_progress} / {XP_PER_LEVEL}`\n"
-        f"> 📈 Next Level: `{xp_to_next}` XP needed\n\n"
+        # This now shows dynamic caps like /1000, /2000, /4000
+        f"> ✨ XP: `{xp_progress} / {xp_req_for_next}`\n" 
+        f"> 📈 To Level Up: `{xp_to_next}` XP needed\n\n"
 
         f"**Contract**\n"
         f"> ⏳ Status: {expiry_status}\n\n"
@@ -2508,10 +2607,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"> 👻 Shadow Soldiers: `{shadows_count}`\n"
     )
 
-    # --- [NEW] Generate and Send Profile Card ---
+    # --- Generate Card ---
     card_path = None
     try:
-        # Generate the new dynamic ID card
         card_path = generate_profile_card(user_data)
         
         with open(card_path, "rb") as photo:
@@ -2526,13 +2624,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error generating/sending profile card: {e}")
         # Fallback to text-only if card generation fails
         await loading_message.edit_text(
-            f"❌ *Image Generation Error.* System could not load profile visuals.\n\n"
-            f"Please see text data below:\n\n"
-            f"*This is a fallback. Your data is safe.*\n"
-            f"**Player:** @{user_data.get('player_name', 'N/A')}\n"
-            f"**Rank:** {user_data.get('rank', 'E')}\n"
-            f"**ID:** {user_id}\n\n"
-            f"{profile_caption}", # Send the caption as the main text
+            f"❌ *Image Generation Error.*\n\n{profile_caption}",
             parse_mode=ParseMode.MARKDOWN
         )
     finally:
@@ -5520,6 +5612,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
