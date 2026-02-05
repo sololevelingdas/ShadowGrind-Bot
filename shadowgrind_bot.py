@@ -4545,7 +4545,7 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def set_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manually sets a user's level AND adjusts their XP to the minimum for that level."""
+    """Manually sets a user's level AND adjusts their XP to the correct start of that level."""
     try:
         username = context.args[0]
         level = int(context.args[1])
@@ -4560,22 +4560,20 @@ async def set_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     # --- [NEW LOGIC] ---
-    # Calculate the minimum XP required for the target level
-    # Level 1 requires 0 XP, Level 2 requires 1000 XP, Level 3 requires 2000 XP, etc.
-    min_xp_for_level = (level - 1) * XP_PER_LEVEL
+    # Use the helper to find the EXACT XP needed for the start of this level
+    new_xp_total = get_level_start_xp(level)
     
-    # Update BOTH level and XP
+    # Update BOTH level and XP to keep them in sync
     user_doc.reference.update({
         "level": level,
-        "xp": min_xp_for_level 
+        "xp": new_xp_total 
     })
     # --- [END NEW LOGIC] ---
     
     await update.message.reply_text(
         f"✅ Set @{user_doc.to_dict().get('username')}'s level to {level} "
-        f"and adjusted their XP to {min_xp_for_level}."
+        f"and adjusted their XP to {new_xp_total}."
     )
-
 
 @admin_only
 async def set_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5599,6 +5597,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
