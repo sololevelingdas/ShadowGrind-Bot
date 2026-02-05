@@ -2626,8 +2626,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard."""
-    message = update.message or update.callback_query.message
+    """Displays the server-wide leaderboard using Player Names."""
+    # 1. Safety Fix: Use effective_message to prevent crashes on edits
+    message = update.effective_message
     
     all_users = [doc.to_dict() for doc in db.collection("users").stream() if doc.to_dict().get("rank")]
     sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u["rank"]), -u["level"]))
@@ -2637,16 +2638,28 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     top_hunter = sorted_users[0]
+    
+    # Generate Banner (Passes the full user dict, so ensure your banner logic checks player_name too if needed)
     banner_path = generate_leaderboard_banner(top_hunter)
     try:
-        await message.reply_photo(photo=open(banner_path, "rb"))
+        with open(banner_path, "rb") as photo:
+            await message.reply_photo(photo=photo)
+    except Exception as e:
+        print(f"Banner error: {e}")
     finally:
         if os.path.exists(banner_path):
             os.remove(banner_path)
 
     leaderboard_text = "🏆 **Shadow Hunter Leaderboard** 🏆\n\n"
+    
+    # 2. Name Fix: Iterate and prioritize 'player_name'
     for i, user in enumerate(sorted_users[1:10], 2):
-        leaderboard_text += f"{i}. `@{user.get('username', 'N/A')}` - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
+        # Logic: Try player_name -> Try username -> Default to "Unknown"
+        name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
+        
+        # If it's a player name (no @), make it bold. If it's a handle, keep the @ logic if you prefer.
+        # This creates: "2. **Hyper** - Rank E..."
+        leaderboard_text += f"{i}. **{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
         
     await message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -5507,6 +5520,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
