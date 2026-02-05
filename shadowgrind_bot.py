@@ -259,17 +259,21 @@ load_dotenv()
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "1419440031") # Your Admin Telegram User ID
 bot_token = os.getenv("BOT_TOKEN")
 
-XP_REQ_E = 1000   # Lv 1-9
-XP_REQ_D = 2000   # Lv 10-24 (Doubled)
-XP_REQ_C = 4000   # Lv 25-44 (Doubled)
-XP_REQ_B = 8000   # Lv 45-69 (Doubled)
-XP_REQ_A = 16000  # Lv 70-99 (Doubled)
-XP_REQ_S = 32000  # Lv 100+  (Doubled)
+
 FONT_FILE_REGULAR = "Exo2-Regular.ttf"
 FONT_FILE_BOLD = "Exo2-Bold.ttf"
 MIN_RANK_TO_CREATE_GUILD = "D"
 MAX_GUILD_MEMBERS = 20
 
+# --- PROGRESSION CONSTANTS ---
+XP_REQ_E = 1000   # Lv 1-9 (1000 per level)
+XP_REQ_D = 2000   # Lv 10-24 (2000 per level)
+XP_REQ_C = 4000   # Lv 25-44 (4000 per level)
+XP_REQ_B = 8000   # Lv 45-69 (8000 per level)
+XP_REQ_A = 16000  # Lv 70-99 (16000 per level)
+XP_REQ_S = 32000  # Lv 100+  (32000 per level)
+
+# Define which levels trigger a Rank Up
 RANK_UP_LEVELS = { "E": 10, "D": 25, "C": 45, "B": 70, "A": 100 }
 RANK_UP_QUESTS = {
     "E": [
@@ -715,7 +719,7 @@ def get_rank_sort_value(rank):
 # --- PASTE THE 3 FUNCTIONS HERE ---
 
 def get_xp_req_for_level(level):
-    """Returns the XP needed to complete the current level."""
+    """Returns how much XP is needed to complete the CURRENT level."""
     if level < 10: return XP_REQ_E
     if level < 25: return XP_REQ_D
     if level < 45: return XP_REQ_C
@@ -723,46 +727,43 @@ def get_xp_req_for_level(level):
     if level < 100: return XP_REQ_A
     return XP_REQ_S
 
-def calculate_level_from_xp(total_xp):
-    """Calculates level based on the Rank Thresholds."""
-    # Tier 1: E-Rank (Lv 1-9) | Cap: 9,000 XP
-    if total_xp < 9000:
-        return (total_xp // XP_REQ_E) + 1
-    
-    # Tier 2: D-Rank (Lv 10-24) | Cap: 9,000 + (15*2000) = 39,000 XP
-    if total_xp < 39000:
-        remaining = total_xp - 9000
-        return 10 + (remaining // XP_REQ_D)
-
-    # Tier 3: C-Rank (Lv 25-44) | Cap: 39,000 + (20*4000) = 119,000 XP
-    if total_xp < 119000:
-        remaining = total_xp - 39000
-        return 25 + (remaining // XP_REQ_C)
-
-    # Tier 4: B-Rank (Lv 45-69) | Cap: 119,000 + (25*8000) = 319,000 XP
-    if total_xp < 319000:
-        remaining = total_xp - 119000
-        return 45 + (remaining // XP_REQ_B)
-
-    # Tier 5: A-Rank (Lv 70-99) | Cap: 319,000 + (30*16000) = 799,000 XP
-    if total_xp < 799000:
-        remaining = total_xp - 319000
-        return 70 + (remaining // XP_REQ_A)
-
-    # Tier 6: S-Rank+
-    remaining = total_xp - 799000
-    return 100 + (remaining // XP_REQ_S)
-
 def get_level_start_xp(level):
-    """Returns the Total XP required to REACH the start of this level."""
+    """Calculates the cumulative XP required to REACH the start of this level."""
     if level <= 1: return 0
-    if level <= 10: return (level - 1) * XP_REQ_E
-    if level <= 25: return 9000 + (level - 10) * XP_REQ_D
-    if level <= 45: return 39000 + (level - 25) * XP_REQ_C
-    if level <= 70: return 119000 + (level - 45) * XP_REQ_B
-    if level <= 100: return 319000 + (level - 70) * XP_REQ_A
+    
+    # E-Rank (Lv 1-9)
+    if level <= 10: 
+        return (level - 1) * XP_REQ_E
+    
+    # D-Rank (Lv 10-24)
+    # Base for Lv 10 (9000) + (levels into D-rank * 2000)
+    if level <= 25: 
+        return 9000 + (level - 10) * XP_REQ_D
+        
+    # C-Rank (Lv 25-44)
+    # Base for Lv 25 (39000) + ...
+    if level <= 45: 
+        return 39000 + (level - 25) * XP_REQ_C
+        
+    # B-Rank (Lv 45-69)
+    if level <= 70: 
+        return 119000 + (level - 45) * XP_REQ_B
+        
+    # A-Rank (Lv 70-99)
+    if level <= 100: 
+        return 319000 + (level - 70) * XP_REQ_A
+        
+    # S-Rank (Lv 100+)
     return 799000 + (level - 100) * XP_REQ_S
 
+def calculate_level_from_xp(total_xp):
+    """Reverse calculates the level based on Total XP."""
+    if total_xp < 9000:   return (total_xp // XP_REQ_E) + 1
+    if total_xp < 39000:  return 10 + ((total_xp - 9000) // XP_REQ_D)
+    if total_xp < 119000: return 25 + ((total_xp - 39000) // XP_REQ_C)
+    if total_xp < 319000: return 45 + ((total_xp - 119000) // XP_REQ_B)
+    if total_xp < 799000: return 70 + ((total_xp - 319000) // XP_REQ_A)
+    return 100 + ((total_xp - 799000) // XP_REQ_S)
 # ----------------------------------
 
 # ... other helper functions follow ...
@@ -2135,10 +2136,11 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- (Replace your old process_mission_completion function) ---
 
 async def process_mission_completion(update, context, user_ref, user_data, mission_data, proof_data=None):
-    """Central function to handle all post-mission-completion logic."""
-    message = update.message or update.callback_query.message
+    """Central function to handle all post-mission-completion logic with Auto-Fix for XP."""
+    # Use effective_message to prevent crashes on edited messages
+    message = update.effective_message
     
-    is_manual_approval = (update.callback_query and update.callback_query.data.startswith("mission_approve_"))
+    is_manual_approval = (update.callback_query and update.callback_query.data.startswith("audit_pass_"))
     
     progress_msg = None
     if not is_manual_approval:
@@ -2149,7 +2151,7 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     perk_reward = mission_data.get("perks", [])
     
     # ======================================================
-    # [NEW CODE START] - D-RANK XP NERF (MAX 100 XP)
+    # 1. D-RANK XP NERF (MAX 100 XP)
     # ======================================================
     current_level = user_data.get("level", 1)
     original_base_xp = xp_reward
@@ -2157,16 +2159,13 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
 
     # If Level is 10 or higher (D-Rank+), Cap Base XP at 100
     if current_level >= 10:
-        # The Nerf: Even if mission gives 1000, we make it 100.
         xp_reward = min(xp_reward, 100)
-        
         if original_base_xp > 100:
             summary_text += "\n📉 _Rank Penalty Applied: XP capped at 100._"
-    # ======================================================
-    # [NEW CODE END]
-    # ======================================================
 
-    # --- 1. BONUS CALCULATION (Guild Perks + Active Items) ---
+    # ======================================================
+    # 2. BONUS CALCULATION (Guild Perks + Active Items)
+    # ======================================================
     guild_id = user_data.get("guild_id")
     guild_perk_effects = []
     guild_ref = None 
@@ -2195,23 +2194,26 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     if xp_effect:
         # Check expiry
         expires_at = xp_effect.get("expires_at")
-        if expires_at and expires_at > datetime.now(timezone.utc):
-            # Apply multiplier (e.g., if item gives 1.5x, we multiply existing boost)
-            xp_boost_total *= float(xp_effect.get("value", 1.0))
-            item_boost_active = True
-        else:
-            pass
+        if expires_at:
+            # Timezone fix
+            now_utc = datetime.now(timezone.utc)
+            if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+            if expires_at > now_utc:
+                # Apply multiplier
+                xp_boost_total *= float(xp_effect.get("value", 1.0))
+                item_boost_active = True
 
-    # C. Loadout (Equipment) Bonuses [NEW]
+    # C. Loadout (Equipment) Bonuses
     loadout = user_data.get("loadout", {})
     for slot, item_id in loadout.items():
         stats = EQUIPMENT_STATS.get(item_id)
         if stats and stats.get("bonus_type") == "xp":
             xp_boost_total += stats.get("value", 0.0)
             
-    # Apply Total Boost (Boosts apply AFTER the 100 XP Cap)
-    original_xp = xp_reward
-    xp_reward = int(xp_reward * xp_boost_total)
+    # Apply Total Boost
+    final_xp_gain = int(xp_reward * xp_boost_total)
 
     # -- Summary Text Update --
     if xp_boost_total > 1.0:
@@ -2219,24 +2221,27 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
         if item_boost_active:
             summary_text += f"\n   _(Effect: {xp_effect['source']} active)_"
 
+    # ======================================================
+    # 3. LEVEL CALCULATION & LEGACY DATA FIX (THE CRITICAL FIX)
+    # ======================================================
     previous_level = user_data.get("level", 1)
-    
-    # Calculate new XP total *before* updating DB
     current_total_xp = user_data.get("xp", 0)
-    new_total_xp = current_total_xp + xp_reward
+
+    # [AUTO-FIX]: Check if XP is too low for current level (Legacy Data Glitch)
+    # E.g. User is Level 9 but has 0 XP. 
+    # Minimum XP for Level 9 is 8000. So we bump them to 8000.
+    min_xp_for_current_level = get_level_start_xp(previous_level)
     
-    # ======================================================
-    # [NEW CODE START] - USE NEW TIERED LEVELING MATH
-    # ======================================================
-    # Replaced simple division with the smart calculator
+    if current_total_xp < min_xp_for_current_level:
+        current_total_xp = min_xp_for_current_level
+        print(f"DEBUG: Fixed Legacy XP for User {user_ref.id}. Bumped to {min_xp_for_current_level}.")
+
+    # Now add the new reward to the FIXED total
+    new_total_xp = current_total_xp + final_xp_gain
+    
+    # Calculate new level based on this correct total using NEW MATH
     new_level = calculate_level_from_xp(new_total_xp)
-    # ======================================================
-    # [NEW CODE END]
-    # ======================================================
     
-    if xp_boost_total > 1.0:
-            summary_text += f"\n_Guild Perk Bonus: +{xp_reward - original_xp} XP_"
-        
     level_up_occurred = new_level > previous_level
     if level_up_occurred:
         summary_text += f"\n\n**LEVEL UP!** You have ascended to Level {new_level}."
@@ -2245,27 +2250,30 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
         if new_level == 10:
             summary_text += "\n\n⚠️ **WARNING: D-RANK REACHED**\nXP Requirement doubled to 2000.\nMission rewards are now capped at 100 XP."
 
-    # --- 2. USER DATABASE UPDATE ---
-    # Update with the new calculated level and increment XP
+    # ======================================================
+    # 4. DATABASE UPDATES
+    # ======================================================
     updates = {
-        "xp": firestore.Increment(xp_reward), "level": new_level,
-        "current_mission": firestore.DELETE_FIELD, "state": firestore.DELETE_FIELD
+        "xp": new_total_xp,  # Save absolute value to prevent future glitches
+        "level": new_level,
+        "current_mission": firestore.DELETE_FIELD, 
+        "state": firestore.DELETE_FIELD
     }
     if perk_reward:
         updates["perks"] = firestore.ArrayUnion(perk_reward)
     user_ref.update(updates)
-    # --- Update local user_data copy ---
-    user_data['level'] = new_level
-    user_data['xp'] = new_total_xp # Reflect the new total XP locally
-
-    # --- [START OF NEW RANK-UP TRIGGER BLOCK] ---
     
-    # --- 2.5 CHECK FOR RANK UP ---
+    # Update local data copy for next steps
+    user_data['level'] = new_level
+    user_data['xp'] = new_total_xp
+
+    # ======================================================
+    # 5. RANK UP CHECK
+    # ======================================================
     current_rank = user_data.get("rank", "E")
     next_rank_level_req = RANK_UP_LEVELS.get(current_rank)
     rank_up_eligible = False
     
-    # Check only if a next rank exists in the requirements dict
     if next_rank_level_req:
         if new_level >= next_rank_level_req:
             rank_up_eligible = True
@@ -2281,17 +2289,15 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
             f"Do you accept the challenge?"
         )
         keyboard = [[
-            InlineKeyboardButton(f"⚔️ Begin {next_rank_letter}-Rank Trial", callback_data=f"rankup_accept_{current_rank}"), # Pass the CURRENT rank being trialed FROM
+            InlineKeyboardButton(f"⚔️ Begin {next_rank_letter}-Rank Trial", callback_data=f"rankup_accept_{current_rank}"), 
             InlineKeyboardButton("⏳ Prepare Further", callback_data="rankup_decline")
         ]]
         await message.reply_text(rank_up_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
-        
-        # Add a note to the summary text
-        summary_text += f"\n\n**You are now eligible for the {next_rank_letter}-Rank Trial!**"
-        
-    # --- [END OF NEW RANK-UP TRIGGER BLOCK] ---
+        summary_text += f"\n\n**Eligible for {next_rank_letter}-Rank Trial!**"
 
-    # --- 3. LOOT DROP SYSTEM (with Guild Perk) ---
+    # ======================================================
+    # 6. LOOT DROP SYSTEM
+    # ======================================================
     new_loot = []
     loot_chance = 0.50 
     
@@ -2334,113 +2340,107 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     if not new_loot:
         summary_text += "\n\n😢 No drop this time. Better luck next time!"
         
-    # --- 4. GUILD XP CONTRIBUTION ---
-    guild_data = None
-    if guild_ref:
-        guild_doc = guild_ref.get()
-        if guild_doc.exists:
-            guild_data = guild_doc.to_dict()
-
-    if guild_data: 
-        gxp_reward = int(original_xp * GXP_CONTRIBUTION_RATE) 
-        # ... rest of your guild xp logic ... 
+    # ======================================================
+    # 7. GUILD & WORLD BOSS LOGIC
+    # ======================================================
+    
+    # --- Guild XP ---
+    if guild_id and guild_ref:
+        # Use pre-bonus XP for GXP to keep guild growth balanced
+        gxp_reward = int(original_base_xp * GXP_CONTRIBUTION_RATE) 
+        
+        # Apply Guild GXP Boosts
         gxp_boost = 1.0
         for effect in guild_perk_effects:
             if effect.startswith("gxp_boost_"):
-                try:
-                    gxp_boost += float(effect.split('_')[2])
-                except Exception as e:
-                    print(f"Error applying GXP perk {effect}: {e}")
+                try: gxp_boost += float(effect.split('_')[2])
+                except: pass
         
         gxp_reward = int(gxp_reward * gxp_boost)
         guild_ref.update({"xp": firestore.Increment(gxp_reward)})
-        summary_text += f"\n\n🛡️ Your Guild gained **+{gxp_reward} GXP** from your efforts."
+        summary_text += f"\n🛡️ Your Guild gained **+{gxp_reward} GXP** from your efforts."
         
-        # --- 5. GUILD LEVEL UP CHECK ---
+        # Check Guild Level Up
         updated_guild_doc = guild_ref.get()
         if updated_guild_doc.exists:
-            updated_guild_data = updated_guild_doc.to_dict()
-            await level_up_guild(guild_ref, updated_guild_data, context)
+            await level_up_guild(guild_ref, updated_guild_doc.to_dict(), context)
+            
+        # Check Guild Missions
+        if guild_doc.exists: # Re-fetch to be safe
+             guild_data = guild_doc.to_dict()
+             if guild_data.get("active_mission"):
+                active_mission = guild_data.get("active_mission")
+                mission_type = active_mission.get("type")
+                increment_amount = 0
+                
+                if mission_type == "mission_difficulty_hard":
+                    personal_mission_difficulty = mission_data.get("difficulty", "Easy")
+                    if personal_mission_difficulty in ["Advanced", "Extreme"]:
+                        increment_amount = 1
+                elif mission_type == "xp_goal":
+                    increment_amount = final_xp_gain 
+                elif mission_type == "mission_goal":
+                    increment_amount = 1 
+                    
+                if increment_amount > 0:
+                    current_progress = active_mission.get("current_progress", 0)
+                    target_goal = active_mission.get("goal", float('inf')) 
+                    new_progress = current_progress + increment_amount
+                    
+                    if new_progress >= target_goal:
+                        await complete_guild_mission(context, guild_ref, guild_data, active_mission)
+                        summary_text += f"\n\n**Your effort completed the Guild Contract!**"
+                    else:
+                        guild_ref.update({
+                            "active_mission.current_progress": firestore.Increment(increment_amount)
+                        })
+                        summary_text += f"\n\n🛡️ Your efforts contributed `+{increment_amount}` to the Guild Contract."
 
-    # --- 6. WORLD BOSS DAMAGE LOGIC ---
+
+    # --- World Boss Damage ---
     active_boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
     active_boss_doc = next(active_boss_query, None)
     
-    @firestore.transactional
-    def _update_boss_health_in_transaction(transaction, boss_ref, user_id, damage_dealt):
-        # ... (transaction logic remains the same) ...
-        snapshot = boss_ref.get(transaction=transaction)
-        if not snapshot.exists: return None
-        current_health = snapshot.get('current_health')
-        new_health = current_health - damage_dealt
-        update_data = {f'damage_log.{user_id}': firestore.Increment(damage_dealt)}
-        boss_is_defeated = False
-        if new_health <= 0:
-            update_data['current_health'] = 0
-            update_data['is_active'] = False
-            boss_is_defeated = True
-        else:
-            update_data['current_health'] = new_health
-        transaction.update(boss_ref, update_data)
-        return boss_is_defeated
-
-
     if active_boss_doc:
-        damage_dealt = max(1, int(xp_reward * 0.01)) 
-        user_id_str = str(update.effective_user.id) # Use string ID here
+        damage_dealt = max(1, int(final_xp_gain * 0.01)) 
+        user_id_str = str(update.effective_user.id)
         
+        # Define transaction for boss
+        @firestore.transactional
+        def _update_boss(transaction, boss_ref, u_id, dmg):
+            snapshot = boss_ref.get(transaction=transaction)
+            if not snapshot.exists: return False
+            curr_hp = snapshot.get('current_health')
+            new_hp = curr_hp - dmg
+            upd = {f'damage_log.{u_id}': firestore.Increment(dmg)}
+            is_dead = False
+            if new_hp <= 0:
+                upd['current_health'] = 0
+                upd['is_active'] = False
+                is_dead = True
+            else:
+                upd['current_health'] = new_hp
+            transaction.update(boss_ref, upd)
+            return is_dead
+
         transaction = db.transaction()
-        boss_defeated = _update_boss_health_in_transaction(
-            transaction, active_boss_doc.reference, user_id_str, damage_dealt # Pass string ID
-        )
+        boss_defeated = _update_boss(transaction, active_boss_doc.reference, user_id_str, damage_dealt)
 
         if boss_defeated:
             boss_data = active_boss_doc.to_dict()
-            winner_username = user_data.get("username", "Unknown") # Use local user_data
-            victory_message = (
-                f"**⚔️ VICTORY! ⚔️**\n\n"
-                f"The World Boss **{boss_data['name']}** has been defeated!\n\n"
-                f"**The Monarch's Hand (Final Blow):** @{winner_username}"
-            )
-            # Send as new message, not reply, in case button triggered this
-            await context.bot.send_message(chat_id=message.chat_id, text=victory_message, parse_mode=ParseMode.MARKDOWN)
+            winner_name = user_data.get("username", "Unknown")
+            vic_msg = (f"**⚔️ VICTORY! ⚔️**\n\n"
+                       f"The World Boss **{boss_data['name']}** has been defeated!\n\n"
+                       f"**The Monarch's Hand (Final Blow):** @{winner_name}")
+            await context.bot.send_message(chat_id=message.chat_id, text=vic_msg, parse_mode=ParseMode.MARKDOWN)
 
-
-    # --- 7. GUILD MISSION PROGRESS TRACKING (NEW LOGIC) ---
-    if guild_data and guild_data.get("active_mission"):
-        active_mission = guild_data.get("active_mission")
-        mission_type = active_mission.get("type")
-        increment_amount = 0
-        
-        if mission_type == "mission_difficulty_hard":
-            personal_mission_difficulty = mission_data.get("difficulty", "Easy")
-            if personal_mission_difficulty in ["Advanced", "Extreme"]:
-                increment_amount = 1
-        elif mission_type == "xp_goal":
-            increment_amount = xp_reward 
-        elif mission_type == "mission_goal":
-            increment_amount = 1 
-            
-        if increment_amount > 0:
-            current_progress = active_mission.get("current_progress", 0)
-            target_goal = active_mission.get("goal", float('inf')) 
-            new_progress = current_progress + increment_amount
-            
-            if new_progress >= target_goal:
-                await complete_guild_mission(context, guild_ref, guild_data, active_mission)
-                summary_text += f"\n\n**Your effort completed the Guild Contract!**"
-            else:
-                guild_ref.update({
-                    "active_mission.current_progress": firestore.Increment(increment_amount)
-                })
-                summary_text += f"\n\n🛡️ Your efforts contributed `+{increment_amount}` to the Guild Contract."
-
-    # --- 8. Final Report --- 
+    # ======================================================
+    # 8. FINAL REPORT & CLEANUP
+    # ======================================================
     report_card_path = None
     try:
-        # Pass the potentially updated previous_level and new_level
         report_card_path = generate_after_action_report(
-            mission_title, xp_reward, previous_level, new_level, new_loot, perk_reward
+            mission_title, final_xp_gain, previous_level, new_level, new_loot, perk_reward
         )
         with open(report_card_path, "rb") as photo:
             await message.reply_photo(photo=photo)
@@ -2461,10 +2461,8 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     )
     
     if progress_msg:
-        try:
-            await progress_msg.delete()
-        except Exception as e:
-            print(f"Could not delete progress message: {e}")
+        try: await progress_msg.delete()
+        except: pass
 
 
 async def start_rank_up_trial(update: Update, context: ContextTypes.DEFAULT_TYPE, rank: str):
@@ -2549,23 +2547,29 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await loading_message.edit_text("📊 Compiling Hunter Record...")
 
-    # --- 1. GET DATA ---
+    # --- 1. GET & CORRECT DATA ---
     current_total_xp = user_data.get("xp", 0)
-    level = user_data.get("level", 1)
     
-    # --- 2. CALCULATE RELATIVE PROGRESS (The Fix) ---
+    # [THE FIX] Recalculate level on the fly based on Total XP
+    # This ensures the level displayed always matches the XP math, fixing glitches.
+    level = calculate_level_from_xp(current_total_xp)
+    
+    # If the calculated level is different from DB, update the variable for display
+    # (We don't save to DB here to keep it fast, but it fixes the visual math)
+    user_data['level'] = level 
+    
+    # --- 2. CALCULATE RELATIVE PROGRESS ---
     # How much XP is needed to finish THIS specific level? (1000, 2000, etc.)
     xp_cap_for_this_level = get_xp_req_for_level(level)
     
     # How much Total XP was required to reach the START of this level?
-    # (e.g. If you are Level 4, you needed 3000 XP to get there)
     xp_at_start_of_level = get_level_start_xp(level)
     
-    # Subtract previous levels to get current progress
-    # e.g. 2940 Total - 3000 Start = -60 (Legacy data fix) or 3500 - 3000 = 500
+    # Subtract previous levels to get current progress bar
+    # e.g. 2940 Total - 2000 (Start of Lv 3) = 940 XP Progress
     xp_progress = current_total_xp - xp_at_start_of_level
     
-    # Legacy Data Fix: If user has less XP than their level requires (e.g. manual level set)
+    # Safety catch for legacy data weirdness
     if xp_progress < 0:
         xp_progress = 0 
 
@@ -5595,6 +5599,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
