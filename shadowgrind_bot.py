@@ -2532,9 +2532,8 @@ async def process_rank_up_completion(update: Update, context: ContextTypes.DEFAU
 
 @check_active_status
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the user's premium ID card and stats with Tiered Leveling."""
-    # 1. Use effective_message to prevent crashes on edits
-    message = update.effective_message 
+    """Displays the user's premium ID card and stats with Corrected Math."""
+    message = update.effective_message
     user_id = str(update.effective_user.id)
     loading_message = await message.reply_text("🧠 Accessing Hunter Database...")
 
@@ -2548,55 +2547,51 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = user_doc.to_dict()
     user_data["telegram_id"] = user_id 
 
-    await loading_message.edit_text("📊 Compiling Hunter Record... Generating ID...")
+    await loading_message.edit_text("📊 Compiling Hunter Record...")
 
-    # ======================================================
-    # [NEW CODE START] - DYNAMIC XP CALCULATION
-    # ======================================================
-    current_xp = user_data.get("xp", 0)
+    # --- 1. GET DATA ---
+    current_total_xp = user_data.get("xp", 0)
     level = user_data.get("level", 1)
     
-    # 1. How much XP does THIS specific level need? (1000, 2000, 4000...)
-    xp_req_for_next = get_xp_req_for_level(level)
+    # --- 2. CALCULATE RELATIVE PROGRESS (The Fix) ---
+    # How much XP is needed to finish THIS specific level? (1000, 2000, etc.)
+    xp_cap_for_this_level = get_xp_req_for_level(level)
     
-    # 2. How much total XP did it take to reach the start of this level?
+    # How much Total XP was required to reach the START of this level?
+    # (e.g. If you are Level 4, you needed 3000 XP to get there)
     xp_at_start_of_level = get_level_start_xp(level)
     
-    # 3. Current progress into this level (e.g. 150 XP into Level 10)
-    xp_progress = current_xp - xp_at_start_of_level
+    # Subtract previous levels to get current progress
+    # e.g. 2940 Total - 3000 Start = -60 (Legacy data fix) or 3500 - 3000 = 500
+    xp_progress = current_total_xp - xp_at_start_of_level
     
-    # 4. Remaining XP needed
-    xp_to_next = xp_req_for_next - xp_progress
-    # ======================================================
-    # [NEW CODE END]
-    # ======================================================
+    # Legacy Data Fix: If user has less XP than their level requires (e.g. manual level set)
+    if xp_progress < 0:
+        xp_progress = 0 
 
-    # --- Formatting Expiry ---
+    # Remaining to next level
+    xp_to_next = xp_cap_for_this_level - xp_progress
+
+    # --- 3. FORMATTING ---
     expires_at = user_data.get("expires_at")
     expiry_status = "`Unknown`"
     if isinstance(expires_at, datetime):
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at.tzinfo is None: expires_at = expires_at.replace(tzinfo=timezone.utc)
         days_left = (expires_at - datetime.now(timezone.utc)).days
         expiry_status = f"`{days_left}` days remaining" if days_left >= 0 else "`Expired`"
     elif expires_at:
-        # Fallback if expiry is not a datetime object
         expiry_status = str(expires_at)
 
     total_items = sum(count for count in user_data.get("inventory", {}).values() if count > 0)
-    
-    try:
-        shadows_count = len(list(user_ref.collection("shadows").stream()))
-    except:
-        shadows_count = 0
+    try: shadows_count = len(list(user_ref.collection("shadows").stream()))
+    except: shadows_count = 0
 
-    # --- Updated Caption with New Variables ---
+    # --- 4. BUILD CAPTION ---
     profile_caption = (
         f"**📊 SYSTEM STATS & ASSETS**\n\n"
         f"**Progression**\n"
         f"> 🏆 Level: `{level}`\n"
-        # This now shows dynamic caps like /1000, /2000, /4000
-        f"> ✨ XP: `{xp_progress} / {xp_req_for_next}`\n" 
+        f"> ✨ XP: `{xp_progress} / {xp_cap_for_this_level}`\n" 
         f"> 📈 To Level Up: `{xp_to_next}` XP needed\n\n"
 
         f"**Contract**\n"
@@ -2607,30 +2602,18 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"> 👻 Shadow Soldiers: `{shadows_count}`\n"
     )
 
-    # --- Generate Card ---
+    # --- 5. SEND ---
     card_path = None
     try:
         card_path = generate_profile_card(user_data)
-        
         with open(card_path, "rb") as photo:
-            await message.reply_photo(
-                photo=photo,
-                caption=profile_caption,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            await message.reply_photo(photo=photo, caption=profile_caption, parse_mode=ParseMode.MARKDOWN)
         await loading_message.delete()
-
     except Exception as e:
-        print(f"Error generating/sending profile card: {e}")
-        # Fallback to text-only if card generation fails
-        await loading_message.edit_text(
-            f"❌ *Image Generation Error.*\n\n{profile_caption}",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        print(f"Error generating profile: {e}")
+        await loading_message.edit_text(profile_caption, parse_mode=ParseMode.MARKDOWN)
     finally:
-        # Clean up the temporary image file
-        if card_path and os.path.exists(card_path):
-            os.remove(card_path)
+        if card_path and os.path.exists(card_path): os.remove(card_path)
 
 # --- (Corrected /inventory command - Button Aware) ---
 @check_active_status
@@ -5612,6 +5595,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
