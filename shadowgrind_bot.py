@@ -1853,7 +1853,7 @@ async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- MISSION & PROGRESSION SYSTEM ---
 @check_active_status
 async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generates and assigns a new premium mission to the user."""
+    """Generates and assigns a new premium mission to the user (Checks Queue first)."""
     user_id = str(update.effective_user.id)
     user_ref = db.collection("users").document(user_id)
     user_doc = user_ref.get()
@@ -1864,7 +1864,9 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("⚠️ You need to activate your contract first.")
         return
 
-    if user_doc.to_dict().get("current_mission"):
+    user_data = user_doc.to_dict()
+
+    if user_data.get("current_mission"):
         await message.reply_text("⚠️ *Mission Already Active!*\nComplete it with `/complete`.", parse_mode=ParseMode.MARKDOWN)
         return
 
@@ -1875,24 +1877,44 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(0.7)
         await progress_msg.edit_text(step, parse_mode=ParseMode.MARKDOWN)
 
-    # Fetch a Random Mission
-    difficulty = random.choice(DIFFICULTIES)
-    mtype = random.choice(TYPES)
-    missions_ref = db.collection("missions").document("MonarchSystem").collection(difficulty).document(mtype).collection("list")
-    all_missions = [doc for doc in missions_ref.stream()]
-    
-    if not all_missions:
-        await message.reply_text(f"❌ No missions found for {difficulty} - {mtype}.")
-        return
+    # ======================================================
+    # [NEW EDIT: QUEUE CHECK]
+    # ======================================================
+    queued_mission = user_data.get("queued_mission")
 
-    mission_doc = random.choice(all_missions)
-    mission_data = mission_doc.to_dict()
-    
+    if queued_mission:
+        # Use the fixed mission chosen by the Monarch
+        mission_data = queued_mission
+        
+        # Remove it from the queue so the next request returns to random
+        user_ref.update({"queued_mission": firestore.DELETE_FIELD})
+        
+        # Set default categories for local logic if they are missing from the queued object
+        difficulty = mission_data.get("difficulty", "Special")
+        mtype = mission_data.get("type", "Elite")
+    else:
+        # No queue found - proceed with Random Selection
+        difficulty = random.choice(DIFFICULTIES)
+        mtype = random.choice(TYPES)
+        missions_ref = db.collection("missions").document("MonarchSystem").collection(difficulty).document(mtype).collection("list")
+        all_missions = [doc for doc in missions_ref.stream()]
+        
+        if not all_missions:
+            await message.reply_text(f"❌ No missions found for {difficulty} - {mtype}.")
+            return
+
+        mission_doc = random.choice(all_missions)
+        mission_data = mission_doc.to_dict()
+
+    # ======================================================
+    # [REST OF EXISTING CODE]
+    # ======================================================
+
     # --- [UPDATE FOR ANTI-CHEAT START] ---
     # Add difficulty, type, AND the start time
     mission_data["difficulty"] = difficulty
     mission_data["type"] = mtype
-    mission_data["started_at"] = datetime.now(timezone.utc) # <--- THIS IS THE NEW LINE REQUIRED
+    mission_data["started_at"] = datetime.now(timezone.utc)
     # --- [UPDATE END] ---
     
     user_ref.update({"current_mission": mission_data})
@@ -1903,9 +1925,12 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Call the new streamlined image generator
         card_path = generate_mission_card(mission_data)
         
+        # Determine prefix for the caption
+        prefix = "SYSTEM OVERRIDE:" if queued_mission else "OBJECTIVE:"
+        
         # --- Construct the Detailed Caption Message ---
         caption_text = (
-            f"**OBJECTIVE: {mission_data.get('title').upper()}**\n\n"
+            f"**{prefix} {mission_data.get('title').upper()}**\n\n"
             f"_{mission_data.get('description', 'No description available.')}_\n\n"
             f"--- **REWARDS** ---\n"
             f"✨ XP Yield: `{mission_data.get('xp', 0)}`\n"
@@ -1916,11 +1941,10 @@ async def mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"To complete this mission, type `/complete` followed by your proof or media."
         )
         
-        ## --- THE FIX IS HERE --- ##
         with open(card_path, "rb") as photo:
             await message.reply_photo(photo=photo, caption=caption_text, parse_mode=ParseMode.MARKDOWN)
         
-        # ADD THIS ONE LINE HERE:
+        # Send the lore bubble
         await send_mission_lore(update, context, mission_data)
 
     except Exception as e:
@@ -3126,6 +3150,44 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error sending buy prompt photo: {e}")
         await loading_message.edit_text("Error initiating purchase. Please try again.")
+
+
+
+@admin_only
+async def set_next_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Monarch only: Queues a specific mission for a player's NEXT /mission request."""
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Usage: `/set_next_mission @username mission_id`")
+        return
+
+    target_username = context.args[0]
+    mission_id = " ".join(context.args[1:]).strip().lower().replace(" ", "_")
+
+    # 1. Find the User
+    user_doc = await find_user_by_username(target_username)
+    if not user_doc:
+        await update.message.reply_text("❌ Hunter not found.")
+        return
+
+    # 2. Find the Mission
+    found_mission = None
+    for diff in DIFFICULTIES:
+        for mtype in TYPES:
+            m_ref = db.collection("missions").document("MonarchSystem").collection(diff).document(mtype).collection("list").document(mission_id).get()
+            if m_ref.exists:
+                found_mission = m_ref.to_dict()
+                found_mission["difficulty"] = diff
+                found_mission["type"] = mtype
+                break
+        if found_mission: break
+
+    if not found_mission:
+        await update.message.reply_text(f"❌ Mission `{mission_id}` not found.")
+        return
+
+    # 3. Store it in a 'queued_mission' field
+    db.collection("users").document(user_doc.id).update({"queued_mission": found_mission})
+    await update.message.reply_text(f"✅ Target Locked. @{target_username} will receive '{found_mission['title']}' on their next request.")
 
 
 # (Replace your entire 'what' function with this)
@@ -5597,6 +5659,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
