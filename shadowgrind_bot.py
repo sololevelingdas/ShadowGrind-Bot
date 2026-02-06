@@ -3951,6 +3951,122 @@ async def guild_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error sending invite DM: {e}")
 
 
+
+
+
+# List of "Cool" names for your NPCs
+NPC_NAMES = ["Kael", "Viper", "Ghost", "SysAdmin", "Neo", "Jin", "Alucard", "Unknown", "Cipher", "Raven"]
+
+@admin_only
+async def create_npc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generates a Fake User (NPC) in the database."""
+    
+    # 1. Generate Fake Identity
+    fake_id = f"npc_{str(uuid.uuid4())[:8]}" # e.g., npc_a1b2c3d4
+    name = random.choice(NPC_NAMES) + f"_{random.randint(10, 99)}"
+    
+    # 2. Determine Stats (Randomized for realism)
+    level = random.randint(5, 50)
+    # Calculate XP based on level so math works
+    xp = get_level_start_xp(level) + random.randint(0, 500)
+    
+    rank_map = {1: "E", 10: "D", 25: "C", 45: "B", 70: "A", 100: "S"}
+    # Find rank based on level
+    rank = "E"
+    for lvl_req, r_name in rank_map.items():
+        if level >= lvl_req:
+            rank = r_name
+
+    # 3. Create Document
+    npc_data = {
+        "username": name.lower(),
+        "player_name": name,
+        "username_initial": name, # No @ symbol for NPCs usually
+        "telegram_id": fake_id, # Fake ID
+        "level": level,
+        "xp": xp,
+        "rank": rank,
+        "is_npc": True, # <--- IMPORTANT FLAG
+        "inventory": {
+            "Scroll of Insight": random.randint(1, 5),
+            "Health Potion": random.randint(1, 10)
+        },
+        "joined_at": firestore.SERVER_TIMESTAMP
+    }
+    
+    db.collection("users").document(fake_id).set(npc_data)
+    
+    await update.message.reply_text(
+        f"👤 **Shadow Hunter Created**\n"
+        f"Name: `{name}`\n"
+        f"ID: `{fake_id}`\n"
+        f"Level: {level} ({rank}-Rank)"
+    )
+
+
+@admin_only
+async def npc_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Forces an NPC to perform a specific game action."""
+    try:
+        if len(context.args) < 2:
+            raise ValueError
+        
+        # Determine Target (Accepts Username or ID)
+        target_input = context.args[0]
+        action = context.args[1].lower()
+        
+        # Search for NPC
+        target_doc = None
+        if target_input.startswith("npc_"):
+            target_doc = db.collection("users").document(target_input).get()
+        else:
+            # Search by name if ID not provided
+            q = db.collection("users").where(filter=FieldFilter("username", "==", target_input.lower())).limit(1).stream()
+            target_doc = next(q, None)
+            
+        if not target_doc or not target_doc.to_dict().get("is_npc"):
+            await update.message.reply_text("❌ NPC not found or target is a real human.")
+            return
+
+        npc_data = target_doc.to_dict()
+        npc_id = target_doc.id
+
+        # --- ACTION: MARKET LISTING ---
+        if action == "sell":
+            # Usage: /npc_action <name> sell <Item> <Price>
+            item_name = " ".join(context.args[2:-1]).strip().strip('"')
+            price = int(context.args[-1])
+            
+            # Create Market Listing
+            db.collection("market").add({
+                "item_name": item_name,
+                "price": price,
+                "seller_id": npc_id,
+                "seller_username": npc_data["username"], # This shows up in /blackmarket
+                "listed_at": firestore.SERVER_TIMESTAMP,
+                "is_sold": False,
+                "is_npc_listing": True
+            })
+            await update.message.reply_text(f"✅ {npc_data['player_name']} listed **{item_name}** for {price}.")
+
+        # --- ACTION: LEVEL UP ---
+        elif action == "levelup":
+            # Usage: /npc_action <name> levelup
+            new_level = npc_data.get("level", 1) + 1
+            new_xp = get_level_start_xp(new_level)
+            db.collection("users").document(npc_id).update({
+                "level": new_level,
+                "xp": new_xp
+            })
+            await update.message.reply_text(f"✅ {npc_data['player_name']} boosted to Level {new_level}.")
+
+        else:
+            await update.message.reply_text("Unknown action. Available: `sell`, `levelup`")
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
 @leadership_only # <--- CHANGED from @leader_only
 async def guild_kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kicks a member. Officers cannot kick other Officers/Leaders."""
@@ -5622,6 +5738,8 @@ async def main():
     app.add_handler(CommandHandler("system", system_menu))
     app.add_handler(CommandHandler("guild_mission", guild_mission)) 
     app.add_handler(CommandHandler("guild_mission_start", guild_mission_start))
+    app.add_handler(CommandHandler("create_npc", create_npc))
+    app.add_handler(CommandHandler("npc_action", npc_action))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -5659,6 +5777,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
