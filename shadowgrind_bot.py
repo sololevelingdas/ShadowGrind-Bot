@@ -2145,7 +2145,7 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # --- 👁️ LAYER 3: RANDOM AUDIT (20% Chance) ---
-        if random.random() < 0.20:
+        if random.random() < 0.05:
             await trigger_audit(update, context, user_data, current_mission_data, minutes_passed, "🎲 RANDOM CHECK")
             return
         # ---------------------------------------------
@@ -5659,6 +5659,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
