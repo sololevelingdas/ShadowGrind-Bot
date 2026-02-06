@@ -2175,17 +2175,16 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     perk_reward = mission_data.get("perks", [])
     
     # ======================================================
-    # 1. D-RANK XP NERF (MAX 100 XP)
+    # 1. D-RANK XP NERF (50% DAMPENING FIELD)
     # ======================================================
     current_level = user_data.get("level", 1)
     original_base_xp = xp_reward
     summary_text = f"Objective **'{mission_title}'** complete."
 
-    # If Level is 10 or higher (D-Rank+), Cap Base XP at 100
+    # If Level is 10 or higher (D-Rank+), Reduce XP by 50%
     if current_level >= 10:
-        xp_reward = min(xp_reward, 100)
-        if original_base_xp > 100:
-            summary_text += "\n📉 _Rank Penalty Applied: XP capped at 100._"
+        xp_reward = int(xp_reward * 0.5) # <--- The 50% Calculation
+        summary_text += f"\n📉 _Dampening Field: XP reduced by 50% ({original_base_xp} ➔ {xp_reward})._"
 
     # ======================================================
     # 2. BONUS CALCULATION (Guild Perks + Active Items)
@@ -5660,6 +5659,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
