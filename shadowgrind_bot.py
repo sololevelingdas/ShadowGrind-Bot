@@ -5573,6 +5573,7 @@ async def main():
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("inventory", inventory))
     app.add_handler(CommandHandler("leaderboard", leaderboard))
+    app.add_handler(CommandHandler("set_next_mission", set_next_mission))
 
     # Economy commands
     app.add_handler(CommandHandler("sell", sell))
@@ -5659,6 +5660,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
