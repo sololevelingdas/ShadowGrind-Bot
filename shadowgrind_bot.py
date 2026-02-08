@@ -2371,10 +2371,12 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     # 7. GUILD & WORLD BOSS LOGIC (FIXED PROGRESSION)
     # ======================================================
     
-    # --- Guild XP & Mission Progress ---
+    # ======================================================
+    # 7. GUILD & WORLD BOSS LOGIC (MASTER VERSION)
+    # ======================================================
+    
     if guild_id and guild_ref:
-        # 1. Guild XP Calculation
-        # Use pre-bonus XP for GXP to keep guild growth balanced
+        # --- 1. Calculate and Give Guild XP (Standard) ---
         gxp_reward = int(original_base_xp * GXP_CONTRIBUTION_RATE) 
         
         # Apply Guild GXP Boosts
@@ -2385,61 +2387,77 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
                 except: pass
         
         gxp_reward = int(gxp_reward * gxp_boost)
-        
-        # Update Guild XP
         guild_ref.update({"xp": firestore.Increment(gxp_reward)})
-        summary_text += f"\n🛡️ Your Guild gained **+{gxp_reward} GXP**."
         
         # Check Guild Level Up (Async)
         updated_guild_doc = guild_ref.get()
         if updated_guild_doc.exists:
             await level_up_guild(guild_ref, updated_guild_doc.to_dict(), context)
             
-        # 2. GUILD MISSION PROGRESSION (The Fix)
-        # Re-fetch fresh data to ensure we don't overwrite concurrent updates
-        guild_doc = guild_ref.get()
-        if guild_doc.exists:
-             guild_data = guild_doc.to_dict()
-             active_mission = guild_data.get("active_mission")
-             
-             if active_mission:
-                mission_goal_type = active_mission.get("type")
-                increment_amount = 0
-                
-                # --- Logic: Does this personal mission count? ---
-                
-                # Case A: Difficulty Goal (e.g., "Complete 10 Hard Missions")
-                if mission_goal_type == "mission_difficulty_hard":
-                    personal_difficulty = mission_data.get("difficulty", "Easy")
-                    if personal_difficulty in ["Advanced", "Extreme"]:
-                        increment_amount = 1
-                
-                # Case B: XP Goal (e.g., "Earn 50,000 XP as a Guild")
-                elif mission_goal_type == "xp_goal":
-                    increment_amount = final_xp_gain 
-                
-                # Case C: Generic Goal (e.g., "Complete 50 Missions")
-                elif mission_goal_type == "mission_goal":
-                    increment_amount = 1 
-                    
-                # --- Apply Update ---
-                if increment_amount > 0:
-                    current_progress = active_mission.get("current_progress", 0)
-                    target_goal = active_mission.get("goal", float('inf')) 
-                    new_progress = current_progress + increment_amount
-                    
-                    if new_progress >= target_goal:
-                        # Mission Complete!
-                        await complete_guild_mission(context, guild_ref, guild_data, active_mission)
-                        summary_text += f"\n\n**🎉 Your effort completed the Guild Contract!**"
-                    else:
-                        # Just update progress
-                        # CRITICAL: We must target the nested field path
-                        guild_ref.update({
-                            "active_mission.current_progress": firestore.Increment(increment_amount)
-                        })
-                        summary_text += f"\n📜 Guild Contract Progress: `+{increment_amount}`"
+        # --- 2. CHECK ACTIVE GUILD MISSION PROGRESS ---
+        guild_data = updated_guild_doc.to_dict()
+        active_mission = guild_data.get("active_mission")
+        
+        if active_mission:
+            # We use the 'type' field from the database to decide logic
+            m_type = active_mission.get("type", "generic")
+            increment_amount = 0
+            
+            # --- LOGIC MAPPING ---
+            
+            # 1. "Complete 15 'Advanced' or 'Extreme' missions"
+            if m_type == "mission_difficulty_hard":
+                p_diff = mission_data.get("difficulty", "Easy")
+                if p_diff in ["Advanced", "Extreme"]:
+                    increment_amount = 1
 
+            # 2. "Earn 50,000 XP"
+            elif m_type == "xp_goal":
+                increment_amount = final_xp_gain
+
+            # 3. "Complete 40 'Mental' missions"
+            elif m_type == "mission_type_mental":
+                if mission_data.get("type") == "Mental":
+                    increment_amount = 1
+
+            # 4. "Complete 40 'Physical' missions"
+            elif m_type == "mission_type_physical":
+                if mission_data.get("type") == "Physical":
+                    increment_amount = 1
+
+            # 5. "Complete 75 missions of any type"
+            elif m_type == "mission_goal":
+                increment_amount = 1
+
+            # 6. "Deal 25,000 damage to World Boss"
+            # Note: This usually updates in the boss logic section, but we check here too
+            elif m_type == "boss_damage_goal":
+                # We calculated damage_dealt earlier in the function
+                # Ensure damage_dealt variable exists before this block
+                damage_dealt = max(1, int(final_xp_gain * 0.01)) 
+                increment_amount = damage_dealt
+
+            # --- 3. APPLY THE UPDATE ---
+            if increment_amount > 0:
+                current_progress = active_mission.get("current_progress", 0)
+                target_goal = active_mission.get("goal", 100)
+                
+                new_progress = current_progress + increment_amount
+                
+                # Update DB
+                if new_progress >= target_goal:
+                    await complete_guild_mission(context, guild_ref, guild_data, active_mission)
+                    summary_text += f"\n\n**🎉 Guild Contract Complete!**"
+                else:
+                    guild_ref.update({
+                        "active_mission.current_progress": firestore.Increment(increment_amount)
+                    })
+                    
+                    # Smart Feedback Message
+                    if m_type in ["xp_goal", "boss_damage_goal"]:
+                        summary_text += f"\n📜 Guild Progress: `+{increment_amount}` ({new_progress:,}/{target_goal:,})"
+                    else:
+                        summary_text += f"\n📜 Guild Progress: `+1` ({new_progress}/{target_goal})"
 
     # --- World Boss Damage ---
     active_boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
@@ -5798,6 +5816,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
