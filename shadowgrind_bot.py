@@ -3840,6 +3840,33 @@ async def leaderboard_guilds(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 
+@admin_only
+async def force_reset_guild_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: Wipes the active mission for a target guild to fix bugs."""
+    if not context.args:
+        await update.message.reply_text("Usage: `/force_reset_guild_mission @LeaderUsername`")
+        return
+
+    username = context.args[0]
+    user_doc = await find_user_by_username(username)
+    
+    if not user_doc:
+        await update.message.reply_text("User not found.")
+        return
+
+    guild_id = user_doc.to_dict().get("guild_id")
+    if not guild_id:
+        await update.message.reply_text("User is not in a guild.")
+        return
+
+    # WIPE THE MISSION
+    db.collection("guilds").document(guild_id).update({
+        "active_mission": firestore.DELETE_FIELD
+    })
+    
+    await update.message.reply_text("✅ Guild Mission Wiped. You can now run `/guild_mission_start` to get a fresh (fixed) contract.")
+
+
 
 
 async def guild_donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5754,6 +5781,7 @@ async def main():
     app.add_handler(CommandHandler("guild_hall", guild_hall))
     app.add_handler(CommandHandler("guild_treasury", guild_treasury))
     app.add_handler(CommandHandler("guild_donate", guild_donate))
+    app.add_handler(CommandHandler("force_reset_guild_mission", force_reset_guild_mission))
     # Add guild_mission handler here later
 
     # World Boss commands
@@ -5816,6 +5844,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
