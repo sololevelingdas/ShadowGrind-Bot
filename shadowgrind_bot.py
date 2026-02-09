@@ -3754,7 +3754,7 @@ async def create_rival_guild(update: Update, context: ContextTypes.DEFAULT_TYPE)
     guild_id = f"guild_{tag}"
     
     # Calculate fake stats based on requested level
-    base_xp = level * 10000 
+    base_xp = level * 200 
     
     guild_data = {
         "name": name,
@@ -3763,6 +3763,9 @@ async def create_rival_guild(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "leader_id": leader_id,
         "created_at": firestore.SERVER_TIMESTAMP,
         "level": level,
+        "next_level_xp": next_lvl_xp,  # <--- ADD THIS LINE
+        "leader_name": leader_name,    # <--- ADD THIS LINE
+        "leader_username": leader_name.lower(), # <--- ADD THIS LINE
         "xp": base_xp,
         "members": [leader_id], # Real list with NPC ID
         "member_count": random.randint(5, 50), # Fake visual count
@@ -5971,6 +5974,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
