@@ -3703,6 +3703,131 @@ async def guild_hall(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+@admin_only
+async def create_rival_guild(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Creates a System-Controlled Guild with a generated NPC Leader.
+    Usage: /create_rival_guild "Guild Name" "TAG" Level
+    Example: /create_rival_guild "The Iron Hands" "IRON" 5
+    """
+    if len(context.args) < 3:
+        await update.message.reply_text("❌ Usage: `/create_rival_guild \"Name\" \"TAG\" Level`")
+        return
+
+    # 1. Parse Arguments (names might have spaces)
+    try:
+        # crude parsing for quotes
+        args_str = " ".join(context.args)
+        import shlex
+        parsed_args = shlex.split(args_str)
+        
+        name = parsed_args[0]
+        tag = parsed_args[1].upper()
+        level = int(parsed_args[2])
+    except:
+        await update.message.reply_text("❌ Error parsing. Use quotes for names.")
+        return
+
+    # 2. Check for Duplicate Tag
+    existing = db.collection("guilds").where(filter=FieldFilter("tag", "==", tag)).get()
+    if list(existing):
+        await update.message.reply_text(f"❌ Guild Tag '{tag}' already exists.")
+        return
+
+    # 3. Generate NPC Leader
+    leader_id = f"npc_leader_{str(uuid.uuid4())[:8]}"
+    leader_name = f"Grandmaster_{tag}"
+    
+    # Create the Leader Doc (So the guild doesn't crash if clicked)
+    db.collection("users").document(leader_id).set({
+        "username": leader_name.lower(),
+        "player_name": leader_name,
+        "is_npc": True,
+        "guild_id": f"guild_{tag}",
+        "guild_role": "Leader",
+        "level": level + 10, # Leader is stronger than guild
+        "xp": 50000
+    })
+
+    # 4. Create the Guild
+    guild_id = f"guild_{tag}"
+    
+    # Calculate fake stats based on requested level
+    base_xp = level * 10000 
+    
+    guild_data = {
+        "name": name,
+        "tag": tag,
+        "description": "A powerful rival organization controlled by the System.",
+        "leader_id": leader_id,
+        "created_at": firestore.SERVER_TIMESTAMP,
+        "level": level,
+        "xp": base_xp,
+        "members": [leader_id], # Real list with NPC ID
+        "member_count": random.randint(5, 50), # Fake visual count
+        "capacity": 50,
+        "is_system_guild": True, # Flag to identify it
+        "active_mission": None
+    }
+    
+    db.collection("guilds").document(guild_id).set(guild_data)
+    
+    await update.message.reply_text(
+        f"🏰 **Rival Guild Established**\n"
+        f"**Name:** {name} [{tag}]\n"
+        f"**Level:** {level}\n"
+        f"**Leader:** {leader_name} (NPC)\n"
+        f"**Fake Members:** {guild_data['member_count']}\n\n"
+        f"Use `/control_guild` to modify its stats."
+    )
+
+
+
+
+@admin_only
+async def control_guild(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Modifies any Guild's stats (Real or Rival).
+    Usage: /control_guild <TAG> <xp|level|members> <value>
+    Example: /control_guild IRON xp 50000
+    """
+    if len(context.args) < 3:
+        await update.message.reply_text("❌ Usage: `/control_guild <TAG> <xp/level/members> <value>`")
+        return
+
+    tag = context.args[0].upper()
+    field = context.args[1].lower()
+    value = int(context.args[2])
+
+    # Find Guild ID by Tag
+    q = db.collection("guilds").where(filter=FieldFilter("tag", "==", tag)).limit(1).stream()
+    guild_doc = next(q, None)
+    
+    if not guild_doc:
+        await update.message.reply_text("❌ Guild not found.")
+        return
+
+    guild_ref = db.collection("guilds").document(guild_doc.id)
+
+    # Update logic
+    if field == "xp":
+        guild_ref.update({"xp": value})
+        await update.message.reply_text(f"✅ Set **{tag}** XP to `{value}`.")
+        
+    elif field == "level":
+        guild_ref.update({"level": value})
+        await update.message.reply_text(f"✅ Set **{tag}** Level to `{value}`.")
+        
+    elif field == "members":
+        # Only works visually for System Guilds
+        guild_ref.update({"member_count": value})
+        await update.message.reply_text(f"✅ Set **{tag}** Member Count to `{value}`.")
+        
+    else:
+        await update.message.reply_text("❌ Unknown field. Use: `xp`, `level`, `members`")
+
+
 # --- (Replace your old /guild_treasury command) ---
 
 async def guild_treasury(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5782,6 +5907,8 @@ async def main():
     app.add_handler(CommandHandler("guild_treasury", guild_treasury))
     app.add_handler(CommandHandler("guild_donate", guild_donate))
     app.add_handler(CommandHandler("force_reset_guild_mission", force_reset_guild_mission))
+    app.add_handler(CommandHandler("create_rival_guild", create_rival_guild))
+    app.add_handler(CommandHandler("control_guild", control_guild))
     # Add guild_mission handler here later
 
     # World Boss commands
@@ -5844,6 +5971,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
