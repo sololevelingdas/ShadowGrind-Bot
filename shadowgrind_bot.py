@@ -2362,17 +2362,54 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
 
     if not new_loot:
         summary_text += "\n\n😢 No drop this time. Better luck next time!"
+
+    # ======================================================
+    # 7. WORLD BOSS LOGIC (MOVED BEFORE GUILD LOGIC)
+    # ======================================================
+    
+    # Initialize Damage Variable (Critical Scope Fix)
+    damage_dealt = 0 
+    
+    active_boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
+    active_boss_doc = next(active_boss_query, None)
+    
+    if active_boss_doc:
+        damage_dealt = max(1, int(final_xp_gain * 0.01)) 
+        user_id_str = str(update.effective_user.id)
         
+        # Define transaction for boss
+        @firestore.transactional
+        def _update_boss(transaction, boss_ref, u_id, dmg):
+            snapshot = boss_ref.get(transaction=transaction)
+            if not snapshot.exists: return False
+            curr_hp = snapshot.get('current_health')
+            new_hp = curr_hp - dmg
+            upd = {f'damage_log.{u_id}': firestore.Increment(dmg)}
+            is_dead = False
+            if new_hp <= 0:
+                upd['current_health'] = 0
+                upd['is_active'] = False
+                is_dead = True
+            else:
+                upd['current_health'] = new_hp
+            transaction.update(boss_ref, upd)
+            return is_dead
+
+        transaction = db.transaction()
+        boss_defeated = _update_boss(transaction, active_boss_doc.reference, user_id_str, damage_dealt)
+
+        if boss_defeated:
+            boss_data = active_boss_doc.to_dict()
+            winner_name = user_data.get("username", "Unknown")
+            vic_msg = (f"**⚔️ VICTORY! ⚔️**\n\n"
+                       f"The World Boss **{boss_data['name']}** has been defeated!\n\n"
+                       f"**The Monarch's Hand (Final Blow):** @{winner_name}")
+            await context.bot.send_message(chat_id=message.chat_id, text=vic_msg, parse_mode=ParseMode.MARKDOWN)
+        else:
+            summary_text += f"\n⚔️ **World Boss:** You dealt `{damage_dealt}` Damage!"
+
     # ======================================================
-    # 7. GUILD & WORLD BOSS LOGIC
-    # ======================================================
-    
-    # ======================================================
-    # 7. GUILD & WORLD BOSS LOGIC (FIXED PROGRESSION)
-    # ======================================================
-    
-    # ======================================================
-    # 7. GUILD & WORLD BOSS LOGIC (MASTER VERSION)
+    # 8. GUILD LOGIC (NOW SEES 'damage_dealt')
     # ======================================================
     
     if guild_id and guild_ref:
@@ -2430,11 +2467,8 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
                 increment_amount = 1
 
             # 6. "Deal 25,000 damage to World Boss"
-            # Note: This usually updates in the boss logic section, but we check here too
             elif m_type == "boss_damage_goal":
-                # We calculated damage_dealt earlier in the function
-                # Ensure damage_dealt variable exists before this block
-                damage_dealt = max(1, int(final_xp_gain * 0.01)) 
+                # USES THE 'damage_dealt' VARIABLE CALCULATED ABOVE
                 increment_amount = damage_dealt
 
             # --- 3. APPLY THE UPDATE ---
@@ -2459,53 +2493,18 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
                     else:
                         summary_text += f"\n📜 Guild Progress: `+1` ({new_progress}/{target_goal})"
 
-    # --- World Boss Damage ---
-    active_boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
-    active_boss_doc = next(active_boss_query, None)
-    
-    if active_boss_doc:
-        damage_dealt = max(1, int(final_xp_gain * 0.01)) 
-        user_id_str = str(update.effective_user.id)
-        
-        # Define transaction for boss
-        @firestore.transactional
-        def _update_boss(transaction, boss_ref, u_id, dmg):
-            snapshot = boss_ref.get(transaction=transaction)
-            if not snapshot.exists: return False
-            curr_hp = snapshot.get('current_health')
-            new_hp = curr_hp - dmg
-            upd = {f'damage_log.{u_id}': firestore.Increment(dmg)}
-            is_dead = False
-            if new_hp <= 0:
-                upd['current_health'] = 0
-                upd['is_active'] = False
-                is_dead = True
-            else:
-                upd['current_health'] = new_hp
-            transaction.update(boss_ref, upd)
-            return is_dead
-
-        transaction = db.transaction()
-        boss_defeated = _update_boss(transaction, active_boss_doc.reference, user_id_str, damage_dealt)
-
-        if boss_defeated:
-            boss_data = active_boss_doc.to_dict()
-            winner_name = user_data.get("username", "Unknown")
-            vic_msg = (f"**⚔️ VICTORY! ⚔️**\n\n"
-                       f"The World Boss **{boss_data['name']}** has been defeated!\n\n"
-                       f"**The Monarch's Hand (Final Blow):** @{winner_name}")
-            await context.bot.send_message(chat_id=message.chat_id, text=vic_msg, parse_mode=ParseMode.MARKDOWN)
-
     # ======================================================
-    # 8. FINAL REPORT & CLEANUP
+    # 9. FINAL REPORT & CLEANUP
     # ======================================================
     report_card_path = None
     try:
-        report_card_path = generate_after_action_report(
+        # Note: 'new_loot' and 'perk_reward' were defined in earlier blocks
+        report_card_path = await generate_after_action_report(
             mission_title, final_xp_gain, previous_level, new_level, new_loot, perk_reward
         )
-        with open(report_card_path, "rb") as photo:
-            await message.reply_photo(photo=photo)
+        if report_card_path and os.path.exists(report_card_path):
+            with open(report_card_path, "rb") as photo:
+                await message.reply_photo(photo=photo)
     except Exception as e:
         print(f"Error sending AAR: {e}")
     finally:
@@ -5971,6 +5970,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
