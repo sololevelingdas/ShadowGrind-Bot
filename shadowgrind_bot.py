@@ -5073,26 +5073,43 @@ async def set_active_boss(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def worldboss_damage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the damage leaderboard for the active boss."""
-    active_boss_doc = next(db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream(), None)
+    
+    # 1. Get the Active Boss
+    active_boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
+    active_boss_doc = next(active_boss_query, None)
+    
     if not active_boss_doc:
         await update.message.reply_text("There is no active world boss.")
         return
 
-    damage_log = active_boss_doc.to_dict().get("damage_log", {})
+    boss_data = active_boss_doc.to_dict()
+    damage_log = boss_data.get("damage_log", {})
+    
     if not damage_log:
         await update.message.reply_text("The World Boss has not taken any damage yet.")
         return
 
+    # 2. Sort Damage (Highest to Lowest)
     sorted_damage = sorted(damage_log.items(), key=lambda item: item[1], reverse=True)
     
-    message_text = f"**{active_boss_doc.to_dict()['name']} - Damage Leaderboard**\n\n"
+    message_text = f"**👹 {boss_data.get('name', 'Boss')} - Damage Leaderboard**\n\n"
+    
+    # 3. Loop through Top 10
     for i, (user_id, damage) in enumerate(sorted_damage[:10], 1):
         user_doc = db.collection("users").document(user_id).get()
-        username = user_doc.to_dict().get("username", user_id)
+        
+        # --- SAFE USER DATA FETCH (Now indented correctly) ---
+        username = f"Unknown Hunter ({user_id})" # Default value
+        
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            # Try 'username', fall back to 'player_name', fall back to ID
+            username = user_data.get("username", user_data.get("player_name", str(user_id)))
+            
+        # Add line to message
         message_text += f"{i}. `@{username}`: **{damage:,}** Damage\n"
         
     await update.message.reply_text(message_text, parse_mode=ParseMode.MARKDOWN)
-
 
 # --- INPUT HANDLERS ---
 
@@ -5970,6 +5987,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
