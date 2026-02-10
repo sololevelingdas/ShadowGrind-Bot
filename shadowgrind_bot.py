@@ -2920,6 +2920,46 @@ async def blackmarket(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id_to_use, text="\u274c An error occurred while fetching market listings.")
 
 
+
+
+async def find_user_by_any_means(search_query: str):
+    """
+    Searches for a user by ID, Username, or Player Name.
+    Returns: (user_ref, user_data) or (None, None)
+    """
+    search_query = search_query.strip()
+    
+    # Clean up input (remove @ if present)
+    clean_query = search_query.lstrip("@")
+
+    # ATTEMPT 1: Direct User ID (Best Match)
+    # Check if the input is a valid Document ID
+    doc_ref = db.collection("users").document(clean_query)
+    doc = doc_ref.get()
+    if doc.exists:
+        return doc_ref, doc.to_dict()
+
+    # ATTEMPT 2: Exact Username Match
+    # (Matches @username)
+    query = db.collection("users").where(filter=FieldFilter("username", "==", clean_query)).limit(1).stream()
+    result = next(query, None)
+    if result:
+        return result.reference, result.to_dict()
+
+    # ATTEMPT 3: Player Name / Display Name
+    # (Matches "Sarath Das" or "Steel Fanged")
+    query = db.collection("users").where(filter=FieldFilter("player_name", "==", search_query)).limit(1).stream()
+    result = next(query, None)
+    if result:
+        return result.reference, result.to_dict()
+
+    # ATTEMPT 4: NPC Name (Fallback for fake users)
+    # Sometimes NPCs are saved with just 'name' or inside a different logic, 
+    # but usually they follow the player_name convention above.
+    
+    return None, None
+
+
 # --- (Add this new command function) ---
 
 async def explain_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4984,37 +5024,51 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     await update.message.reply_text(f"✅ User @{user_doc.to_dict().get('username')} has been unbanned.")
+    
 
 @admin_only
 async def set_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manually sets a user's level AND adjusts their XP to the correct start of that level."""
-    try:
-        username = context.args[0]
-        level = int(context.args[1])
-        if level <= 0: raise ValueError
-    except (ValueError, IndexError):
-        await update.message.reply_text("Usage: `/set_level @username <level>` (Level must be 1 or higher)")
+    """
+    Sets a player's Level (and calculates minimum XP for that level).
+    Usage: /set_level <Name/ID> <Level>
+    """
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Usage: `/set_level <User/ID> <Level>`")
         return
 
-    user_doc = await find_user_by_username(username)
-    if not user_doc:
-        await update.message.reply_text("User not found.")
+    # 1. Parse Arguments
+    # The last argument is the Level. Everything before is the Name.
+    try:
+        target_level = int(context.args[-1])
+        target_query = " ".join(context.args[:-1]) # Handles names with spaces like "Steel Fanged"
+    except ValueError:
+        await update.message.reply_text("❌ Level must be a number.")
         return
-        
-    # --- [NEW LOGIC] ---
-    # Use the helper to find the EXACT XP needed for the start of this level
-    new_xp_total = get_level_start_xp(level)
-    
-    # Update BOTH level and XP to keep them in sync
-    user_doc.reference.update({
-        "level": level,
-        "xp": new_xp_total 
+
+    # 2. Find the User
+    user_ref, user_data = await find_user_by_any_means(target_query)
+
+    if not user_ref:
+        await update.message.reply_text(f"❌ Could not find user: `{target_query}`\nTry using their specific @Username or ID.")
+        return
+
+    # 3. Calculate XP Fix
+    # If we set Level 50, we must give them Level 50 XP, otherwise the bot will auto-nerf them back to Level 1.
+    new_min_xp = get_level_start_xp(target_level) # Ensure you have this function, or use formula: (level * 1000)
+
+    # 4. Update Database
+    user_ref.update({
+        "level": target_level,
+        "xp": new_min_xp # Auto-sync XP
     })
-    # --- [END NEW LOGIC] ---
+
+    name = user_data.get("player_name", user_data.get("username", "Target"))
     
     await update.message.reply_text(
-        f"✅ Set @{user_doc.to_dict().get('username')}'s level to {level} "
-        f"and adjusted their XP to {new_xp_total}."
+        f"🔧 **Admin Override**\n"
+        f"User: `{name}`\n"
+        f"New Level: `{target_level}`\n"
+        f"XP Synced to: `{new_min_xp:,}`"
     )
 
 
@@ -5103,28 +5157,50 @@ async def admin_deal_damage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def set_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manually sets a user's total XP."""
-    try:
-        username = context.args[0]
-        xp = int(context.args[1])
-        if xp < 0: raise ValueError
-    except (ValueError, IndexError):
-        await update.message.reply_text("Usage: `/set_xp @username <xp>`")
+    """
+    Sets a player's exact XP (and recalculates their level).
+    Usage: /set_xp <Name/ID> <XP_Amount>
+    """
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Usage: `/set_xp <User/ID> <Amount>`")
         return
 
-    user_doc = await find_user_by_username(username)
-    if not user_doc:
-        await update.message.reply_text("User not found.")
+    # 1. Parse Arguments
+    try:
+        target_xp = int(context.args[-1])
+        target_query = " ".join(context.args[:-1])
+    except ValueError:
+        await update.message.reply_text("❌ XP must be a number.")
         return
-        
-    # [NEW] Also recalculate their level based on the new XP
-    new_level = (xp // XP_PER_LEVEL) + 1
-    
-    user_doc.reference.update({
-        "xp": xp,
+
+    # 2. Find the User
+    user_ref, user_data = await find_user_by_any_means(target_query)
+
+    if not user_ref:
+        await update.message.reply_text(f"❌ Could not find user: `{target_query}`")
+        return
+
+    # 3. Calculate Level Fix
+    # If we give 1,000,000 XP, we should calculate what level that is.
+    new_level = calculate_level_from_xp(target_xp) # Ensure you have this formula function
+
+    # 4. Update Database
+    user_ref.update({
+        "xp": target_xp,
         "level": new_level
     })
-    await update.message.reply_text(f"✅ Set @{user_doc.to_dict().get('username')}'s XP to {xp} (Level is now {new_level}).")
+
+    name = user_data.get("player_name", user_data.get("username", "Target"))
+    
+    await update.message.reply_text(
+        f"🔧 **Admin Override**\n"
+        f"User: `{name}`\n"
+        f"New XP: `{target_xp:,}`\n"
+        f"Level Synced to: `{new_level}`"
+    )
+
+
+
 
 @admin_only
 async def take_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6148,6 +6224,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
