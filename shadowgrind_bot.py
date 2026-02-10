@@ -6437,6 +6437,7 @@ async def main():
     app.add_handler(CommandHandler("deal_damage", admin_deal_damage))
     app.add_handler(CommandHandler("fake_damage", add_fake_damage))
     app.add_handler(CommandHandler("player_audit", player_audit))
+    app.add_handler(CommandHandler("set_badge", set_badge))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -6474,6 +6475,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
