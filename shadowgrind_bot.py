@@ -122,6 +122,55 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+# ==========================================
+# 🎖️ CUSTOM BADGE STYLES
+# ==========================================
+BADGE_STYLES = {
+    "Founder":      "💠 𝐅𝐎𝐔𝐍𝐃𝐄𝐑",    # Special Font + Diamond
+    "VIP":          "⚜️ 𝐕.𝐈.𝐏",       # Fleur-de-lis + Bold
+    "Honest One":   "⚖️ 𝐇𝐎𝐍𝐄𝐒𝐓",      # Scales of Justice
+    "Monarch":      "👑 𝐌𝐎𝐍𝐀𝐑𝐂𝐇",     # Crown + Serif Font
+    "S-Rank":       "⚡ 𝐒-𝐑𝐀𝐍𝐊",      # Lightning + Bold
+    "Bug Hunter":   "🐛 𝐇𝐔𝐍𝐓𝐄𝐑"       # Fallback
+}
+
+def get_badge_display(user_data, mode="inline"):
+    """
+    Returns badges formatted for Profile (list) or Leaderboard (inline).
+    """
+    badges = user_data.get("badges", [])
+    if not badges: return ""
+
+    display_str = ""
+    
+    if mode == "inline":
+        # For Leaderboard: Short icons only to save space
+        # Example: 👑⚜️ Sarath
+        icon_map = {
+            "Founder": "💠", 
+            "VIP": "⚜️", 
+            "Honest One": "⚖️", 
+            "Monarch": "👑", 
+            "S-Rank": "⚡"
+        }
+        for b in badges:
+            display_str += icon_map.get(b, "")
+        return display_str + " " # Spacer
+        
+    elif mode == "profile":
+        # For Profile: Full fancy tags
+        # Example: 
+        # 💠 𝐅𝐎𝐔𝐍𝐃𝐄𝐑
+        # ⚜️ 𝐕.𝐈.𝐏
+        tags = []
+        for b in badges:
+            style = BADGE_STYLES.get(b, f"🏷️ {b.upper()}")
+            tags.append(f"│  {style}") # Adds a cool vertical line tree effect
+        return "\n".join(tags) + "\n"
+
+    return ""
+
+
 
 # --- DECORATORS ---
 def admin_only(func):
@@ -2638,7 +2687,7 @@ async def process_rank_up_completion(update: Update, context: ContextTypes.DEFAU
 
 @check_active_status
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the user's premium ID card and stats with Corrected Math."""
+    """Displays the user's premium ID card, badges, and stats with Corrected Math."""
     message = update.effective_message
     user_id = str(update.effective_user.id)
     loading_message = await message.reply_text("🧠 Accessing Hunter Database...")
@@ -2698,9 +2747,18 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: shadows_count = len(list(user_ref.collection("shadows").stream()))
     except: shadows_count = 0
 
+    # --- [NEW] BADGE DISPLAY LOGIC ---
+    # We fetch the stylized badge list using the helper function
+    badge_visuals = get_badge_display(user_data, mode="profile")
+    
+    badge_section = ""
+    if badge_visuals:
+        badge_section = f"**🏆 ACHIEVEMENTS**\n{badge_visuals}\n\n"
+
     # --- 4. BUILD CAPTION ---
     profile_caption = (
         f"**📊 SYSTEM STATS & ASSETS**\n\n"
+        f"{badge_section}"  # <--- INJECTED BADGES HERE
         f"**Progression**\n"
         f"> 🏆 Level: `{level}`\n"
         f"> ✨ XP: `{xp_progress} / {xp_cap_for_this_level}`\n" 
@@ -2723,9 +2781,12 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading_message.delete()
     except Exception as e:
         print(f"Error generating profile: {e}")
+        # Fallback to text-only if image generation fails
         await loading_message.edit_text(profile_caption, parse_mode=ParseMode.MARKDOWN)
     finally:
         if card_path and os.path.exists(card_path): os.remove(card_path)
+
+
 
 # --- (Corrected /inventory command - Button Aware) ---
 @check_active_status
@@ -2811,14 +2872,21 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⛓️ *Link Severed...*\n\nYour soul contract has expired.", parse_mode=ParseMode.MARKDOWN)
 
+
+
+
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard using Player Names."""
+    """Displays the server-wide leaderboard using Player Names and Badges."""
     # 1. Safety Fix: Use effective_message to prevent crashes on edits
     message = update.effective_message
     
+    # Fetch all users who have a rank
     all_users = [doc.to_dict() for doc in db.collection("users").stream() if doc.to_dict().get("rank")]
-    sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u["rank"]), -u["level"]))
+    
+    # Sort by Rank (High to Low) then by Level (High to Low)
+    # Assumes get_rank_sort_value helper exists in your code
+    sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u.get("rank", "E")), u.get("level", 1)), reverse=True)
 
     if not sorted_users:
         await message.reply_text("No Hunters have been registered yet. Be the first!")
@@ -2826,27 +2894,36 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     top_hunter = sorted_users[0]
     
-    # Generate Banner (Passes the full user dict, so ensure your banner logic checks player_name too if needed)
-    banner_path = generate_leaderboard_banner(top_hunter)
+    # Generate Banner for the #1 Player
+    banner_path = None
     try:
-        with open(banner_path, "rb") as photo:
-            await message.reply_photo(photo=photo)
+        banner_path = generate_leaderboard_banner(top_hunter)
+        if banner_path and os.path.exists(banner_path):
+            with open(banner_path, "rb") as photo:
+                # We can add a caption to the banner if we want
+                top_badges = get_badge_display(top_hunter, mode="inline")
+                top_name = top_hunter.get("player_name", top_hunter.get("username", "Unknown"))
+                caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{top_name}**"
+                await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         print(f"Banner error: {e}")
     finally:
-        if os.path.exists(banner_path):
+        if banner_path and os.path.exists(banner_path):
             os.remove(banner_path)
 
     leaderboard_text = "🏆 **Shadow Hunter Leaderboard** 🏆\n\n"
     
-    # 2. Name Fix: Iterate and prioritize 'player_name'
+    # 2. Iterate through the rest (2 to 10)
     for i, user in enumerate(sorted_users[1:10], 2):
         # Logic: Try player_name -> Try username -> Default to "Unknown"
         name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
         
-        # If it's a player name (no @), make it bold. If it's a handle, keep the @ logic if you prefer.
-        # This creates: "2. **Hyper** - Rank E..."
-        leaderboard_text += f"{i}. **{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
+        # [NEW] GET BADGES (Inline Mode)
+        # Returns string like "👑⚜️ "
+        badges = get_badge_display(user, mode="inline")
+        
+        # Format: 2. 👑 **Hyper** - Rank E (Level 5)
+        leaderboard_text += f"{i}. {badges}**{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
         
     await message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -4919,6 +4996,51 @@ async def generate_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+@admin_only
+async def set_badge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Grants/Revokes a badge.
+    Usage: /set_badge @user "Honest One" add
+    """
+    if len(context.args) < 3:
+        # Helper to join args like "Honest One"
+        await update.message.reply_text("❌ Usage: `/set_badge <User> <Badge Name> <add/remove>`")
+        return
+
+    # Complex parsing because badge names have spaces (e.g. "Honest One")
+    action = context.args[-1].lower() # Last word is always add/remove
+    target_query = context.args[0]    # First word is user
+    
+    # The middle words are the Badge Name
+    badge_name_input = " ".join(context.args[1:-1]) 
+
+    # Case-insensitive lookup
+    valid_key = next((k for k in BADGE_STYLES.keys() if k.lower() == badge_name_input.lower()), None)
+    
+    if not valid_key:
+        await update.message.reply_text(f"❌ Unknown Badge.\nValid: {', '.join(BADGE_STYLES.keys())}")
+        return
+
+    user_ref, user_data = await find_user_by_any_means(target_query)
+    if not user_ref:
+        await update.message.reply_text("❌ User not found.")
+        return
+
+    current_badges = user_data.get("badges", [])
+    
+    if action == "add":
+        if valid_key not in current_badges:
+            user_ref.update({"badges": firestore.ArrayUnion([valid_key])})
+            await update.message.reply_text(f"✅ Awarded [{valid_key}] to {user_data.get('player_name')}")
+        else:
+            await update.message.reply_text("⚠️ They already have this badge.")
+
+    elif action == "remove":
+        if valid_key in current_badges:
+            user_ref.update({"badges": firestore.ArrayRemove([valid_key])})
+            await update.message.reply_text(f"🗑️ Revoked [{valid_key}].")
+
+
 
 @admin_only
 async def finalize_sale(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6352,6 +6474,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
