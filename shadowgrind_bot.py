@@ -4809,62 +4809,82 @@ async def give_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @admin_only
-async def last_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def player_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Shows the last 2 missions completed by ANY user globally.
+    Shows the last 3 missions completed by a SPECIFIC user.
+    Usage: /player_audit @username
     """
-    await update.message.reply_text("🔍 **Scanning Global Archives...**")
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/player_audit <Name/ID>`")
+        return
 
-    # 1. Query the Logs (Sorted by Newest)
+    # 1. Find the Target User
+    target_query = " ".join(context.args)
+    user_ref, user_data = await find_user_by_any_means(target_query)
+
+    if not user_ref:
+        await update.message.reply_text(f"❌ User '{target_query}' not found.")
+        return
+
+    target_name = user_data.get("username", target_query)
+    target_id = user_ref.id
+
+    await update.message.reply_text(f"🔍 **Scanning Archives for Agent: {target_name}...**")
+
+    # 2. Query Logs for THIS specific User ID
+    # We filter by 'user_id' matching the target
     logs_ref = db.collection("mission_logs")
-    query = logs_ref.order_by("completed_at", direction=firestore.Query.DESCENDING).limit(2)
+    query = logs_ref.where(filter=FieldFilter("user_id", "==", target_id)) \
+                    .order_by("completed_at", direction=firestore.Query.DESCENDING) \
+                    .limit(3) # Fetches last 3
+    
     results = list(query.stream())
 
     if not results:
-        await update.message.reply_text("❌ No mission logs found yet.")
+        await update.message.reply_text(f"📉 No mission history found for **{target_name}**.")
         return
 
-    # 2. Display Each Log
+    # 3. Display Results
     for doc in results:
         data = doc.to_dict()
         
-        # Formatting
-        user = data.get('username', 'Unknown')
+        # Extract Data
         mission = data.get('mission_title', 'Unknown Mission')
         xp = data.get('xp_earned', 0)
         time_taken = data.get('time_taken', 'Unknown')
         completed_at = data.get('completed_at')
         
-        # Format Timestamp (if it's a Firestore datetime)
-        date_str = "Just now"
+        # Format Date
+        date_str = "Unknown Date"
         if completed_at:
-            date_str = completed_at.strftime("%Y-%m-%d %H:%M:%S")
-
-        # Get Proof
+             # Convert Firestore timestamp to readable string
+            dt = completed_at
+            # If it's a Firestore Timestamp object, convert to datetime first
+            if hasattr(dt, 'replace'): 
+                date_str = dt.strftime("%d-%b %H:%M")
+        
         proof_type = data.get('proof_type', 'log')
         proof_content = data.get('proof_data')
 
-        # Construct Message
+        # Build Message
         msg = (
-            f"🛑 **AUDIT LOG** 🛑\n\n"
-            f"👤 **Agent:** @{user}\n"
+            f"🛑 **AUDIT REPORT** 🛑\n"
             f"📜 **Mission:** {mission}\n"
-            f"💰 **Reward:** {xp} XP\n"
-            f"⏱️ **Time Taken:** {time_taken}\n"
-            f"📅 **Finished:** {date_str}\n"
-            f"---------------------------\n"
-            f"🕵️ **PROOF SUBMITTED:**"
+            f"📅 **Date:** {date_str}\n"
+            f"⏱️ **Time:** {time_taken}\n"
+            f"💰 **XP:** {xp}\n"
+            f"🕵️ **PROOF:**"
         )
 
-        # 3. Send Proof (Smart Handling)
+        # Send Proof (Photo or Text)
         if proof_type == "photo" and proof_content:
-            # If proof is a Photo ID, send the photo
             try:
+                # We send the caption with the photo
                 await update.message.reply_photo(photo=proof_content, caption=msg, parse_mode=ParseMode.MARKDOWN)
-            except:
-                await update.message.reply_text(f"{msg}\n[Error loading photo]", parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                await update.message.reply_text(f"{msg}\n_[Error displaying photo]_", parse_mode=ParseMode.MARKDOWN)
         else:
-            # If proof is text log
+            # Text log
             await update.message.reply_text(f"{msg}\n`{proof_content}`", parse_mode=ParseMode.MARKDOWN)
 
 
@@ -6294,7 +6314,7 @@ async def main():
     app.add_handler(CommandHandler("npc_action", npc_action))
     app.add_handler(CommandHandler("deal_damage", admin_deal_damage))
     app.add_handler(CommandHandler("fake_damage", add_fake_damage))
-    app.add_handler(CommandHandler("last_missions", last_missions))
+    app.add_handler(CommandHandler("player_audit", player_audit))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -6332,6 +6352,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
