@@ -3965,6 +3965,81 @@ async def leaderboard_guilds(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 @admin_only
+async def add_fake_damage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Adds a fake entry to the World Boss leaderboard.
+    Usage: /fake_damage <Name> <Damage>
+    Example: /fake_damage James 2000
+    """
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Usage: `/fake_damage <Name> <Amount>`")
+        return
+
+    # 1. Parse Arguments
+    try:
+        # If name is "Dark Knight", handles spaces
+        damage_amount = int(context.args[-1])
+        fake_name = " ".join(context.args[:-1])
+    except ValueError:
+        await update.message.reply_text("❌ Damage must be a number (e.g. 500).")
+        return
+
+    # 2. Generate a Fake ID (e.g., npc_james)
+    fake_id = f"npc_{fake_name.lower().replace(' ', '_')}"
+
+    # 3. Create/Update the Dummy User in DB
+    # (We need this so the Leaderboard code finds a name when it looks up the ID)
+    user_ref = db.collection("users").document(fake_id)
+    if not user_ref.get().exists:
+        user_ref.set({
+            "username": fake_name,      # Leaderboard looks for this
+            "player_name": fake_name,   # Or this
+            "is_npc": True,             # Mark as fake
+            "level": random.randint(5, 50), # Random level for realism
+            "guild_id": "guild_npc"     # Optional: Put them in a fake guild
+        })
+
+    # 4. Find Active Boss
+    boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
+    active_boss_doc = next(boss_query, None)
+
+    if not active_boss_doc:
+        await update.message.reply_text("❌ No Active Boss found.")
+        return
+
+    boss_ref = active_boss_doc.reference
+
+    # 5. Apply Damage (Transaction safe)
+    @firestore.transactional
+    def _apply_fake_damage(transaction, ref, uid, dmg):
+        snapshot = ref.get(transaction=transaction)
+        curr_hp = snapshot.get("current_health")
+        
+        # Calculate new HP
+        new_hp = curr_hp - dmg
+        if new_hp < 0: new_hp = 0
+
+        # Update
+        transaction.update(ref, {
+            "current_health": new_hp,
+            f"damage_log.{uid}": firestore.Increment(dmg)
+        })
+        return new_hp
+
+    transaction = db.transaction()
+    new_hp = _apply_fake_damage(transaction, boss_ref, fake_id, damage_amount)
+
+    # 6. Success Message
+    await update.message.reply_text(
+        f"👻 **Phantom Strike Recorded**\n"
+        f"User: `{fake_name}` (NPC)\n"
+        f"Damage: `{damage_amount:,}`\n"
+        f"Boss HP: `{new_hp:,}`"
+    )
+
+
+
+@admin_only
 async def force_reset_guild_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin: Wipes the active mission for a target guild to fix bugs."""
     if not context.args:
@@ -6035,6 +6110,7 @@ async def main():
     app.add_handler(CommandHandler("create_npc", create_npc))
     app.add_handler(CommandHandler("npc_action", npc_action))
     app.add_handler(CommandHandler("deal_damage", admin_deal_damage))
+    app.add_handler(CommandHandler("fake_damage", add_fake_damage))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -6072,6 +6148,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
