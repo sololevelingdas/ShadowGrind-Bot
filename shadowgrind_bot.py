@@ -2290,6 +2290,53 @@ async def process_mission_completion(update, context, user_ref, user_data, missi
     user_data['level'] = new_level
     user_data['xp'] = new_total_xp
 
+    
+    # [PASTE THIS HERE] GLOBAL AUDIT LOGGING
+    # ======================================================
+    try:
+        # 1. Calculate Time Taken (Duration)
+        # We fetch start time from the local user_data BEFORE it was deleted in DB
+        start_time = user_data.get("current_mission", {}).get("started_at")
+        time_str = "Unknown"
+        
+        if start_time:
+            # Normalize time formats
+            if hasattr(start_time, 'timestamp'):
+                st = start_time
+            elif isinstance(start_time, str):
+                try: st = datetime.fromisoformat(start_time)
+                except: st = datetime.now(timezone.utc)
+            else:
+                st = datetime.now(timezone.utc)
+
+            # Ensure Timezone compatibility
+            if st.tzinfo is None: st = st.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            
+            diff = now - st
+            total_seconds = int(diff.total_seconds())
+            h, rem = divmod(total_seconds, 3600)
+            m, s = divmod(rem, 60)
+            time_str = f"{h}h {m}m {s}s"
+
+        # 2. Prepare Log Data
+        audit_log = {
+            "user_id": user_ref.id,
+            "username": user_data.get("username", "Unknown Hunter"),
+            "mission_title": mission_title,
+            "xp_earned": final_xp_gain,
+            "time_taken": time_str,
+            "proof_type": mission_data.get("proof_type", "log"),
+            "proof_data": proof_data if proof_data else "No Data",
+            "completed_at": firestore.SERVER_TIMESTAMP
+        }
+
+        # 3. Save to 'mission_logs' collection
+        db.collection("mission_logs").add(audit_log)
+        print(f"✅ Audit Log Saved for {user_data.get('username')}")
+        
+    except Exception as e:
+        print(f"⚠️ Error logging mission audit: {e}")
     # ======================================================
     # 5. RANK UP CHECK
     # ======================================================
@@ -4761,6 +4808,66 @@ async def give_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading_msg.edit_text(f"❌ Error updating inventory: {e}")
 
 
+@admin_only
+async def last_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Shows the last 2 missions completed by ANY user globally.
+    """
+    await update.message.reply_text("🔍 **Scanning Global Archives...**")
+
+    # 1. Query the Logs (Sorted by Newest)
+    logs_ref = db.collection("mission_logs")
+    query = logs_ref.order_by("completed_at", direction=firestore.Query.DESCENDING).limit(2)
+    results = list(query.stream())
+
+    if not results:
+        await update.message.reply_text("❌ No mission logs found yet.")
+        return
+
+    # 2. Display Each Log
+    for doc in results:
+        data = doc.to_dict()
+        
+        # Formatting
+        user = data.get('username', 'Unknown')
+        mission = data.get('mission_title', 'Unknown Mission')
+        xp = data.get('xp_earned', 0)
+        time_taken = data.get('time_taken', 'Unknown')
+        completed_at = data.get('completed_at')
+        
+        # Format Timestamp (if it's a Firestore datetime)
+        date_str = "Just now"
+        if completed_at:
+            date_str = completed_at.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Get Proof
+        proof_type = data.get('proof_type', 'log')
+        proof_content = data.get('proof_data')
+
+        # Construct Message
+        msg = (
+            f"🛑 **AUDIT LOG** 🛑\n\n"
+            f"👤 **Agent:** @{user}\n"
+            f"📜 **Mission:** {mission}\n"
+            f"💰 **Reward:** {xp} XP\n"
+            f"⏱️ **Time Taken:** {time_taken}\n"
+            f"📅 **Finished:** {date_str}\n"
+            f"---------------------------\n"
+            f"🕵️ **PROOF SUBMITTED:**"
+        )
+
+        # 3. Send Proof (Smart Handling)
+        if proof_type == "photo" and proof_content:
+            # If proof is a Photo ID, send the photo
+            try:
+                await update.message.reply_photo(photo=proof_content, caption=msg, parse_mode=ParseMode.MARKDOWN)
+            except:
+                await update.message.reply_text(f"{msg}\n[Error loading photo]", parse_mode=ParseMode.MARKDOWN)
+        else:
+            # If proof is text log
+            await update.message.reply_text(f"{msg}\n`{proof_content}`", parse_mode=ParseMode.MARKDOWN)
+
+
 import uuid # Add this to your imports at the top
 
 @admin_only
@@ -6187,6 +6294,7 @@ async def main():
     app.add_handler(CommandHandler("npc_action", npc_action))
     app.add_handler(CommandHandler("deal_damage", admin_deal_damage))
     app.add_handler(CommandHandler("fake_damage", add_fake_damage))
+    app.add_handler(CommandHandler("last_missions", last_missions))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -6224,6 +6332,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
