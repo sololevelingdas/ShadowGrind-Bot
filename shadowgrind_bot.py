@@ -4942,6 +4942,90 @@ async def set_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"and adjusted their XP to {new_xp_total}."
     )
 
+
+
+@admin_only
+async def admin_deal_damage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Deals damage to the Active Boss.
+    Usage: 
+    1. /deal_damage 5000 (Credits You)
+    2. /deal_damage 5000 @username (Credits specific user)
+    """
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/deal_damage <amount> [@username]`")
+        return
+
+    # 1. Parse Amount
+    try:
+        damage = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Damage must be a number.")
+        return
+
+    # 2. Determine Target User (Who gets the credit?)
+    target_user_id = str(update.effective_user.id)
+    target_name = update.effective_user.first_name
+
+    # If an @username is mentioned, try to find them
+    if len(context.args) > 1:
+        username_input = context.args[1].replace("@", "")
+        # Search DB for this username
+        users_ref = db.collection("users")
+        query = users_ref.where(filter=FieldFilter("username", "==", username_input)).limit(1).stream()
+        target_doc = next(query, None)
+        
+        if target_doc:
+            target_user_id = target_doc.id
+            target_name = target_doc.to_dict().get("player_name", username_input)
+        else:
+            await update.message.reply_text(f"❌ User @{username_input} not found.")
+            return
+
+    # 3. Find Active Boss
+    boss_query = db.collection("world_bosses").where(filter=FieldFilter("is_active", "==", True)).limit(1).stream()
+    active_boss_doc = next(boss_query, None)
+    
+    if not active_boss_doc:
+        await update.message.reply_text("❌ No Active Boss found.")
+        return
+
+    boss_ref = active_boss_doc.reference
+    
+    # 4. Execute Transaction (Safe Update)
+    @firestore.transactional
+    def _apply_damage(transaction, ref, uid, dmg):
+        snapshot = ref.get(transaction=transaction)
+        curr_hp = snapshot.get("current_health")
+        new_hp = curr_hp - dmg
+        
+        # Prevent negative HP but allow 0
+        if new_hp < 0: new_hp = 0
+        
+        # Update HP and Leaderboard
+        transaction.update(ref, {
+            "current_health": new_hp,
+            f"damage_log.{uid}": firestore.Increment(dmg)
+        })
+        return new_hp
+
+    transaction = db.transaction()
+    new_hp = _apply_damage(transaction, boss_ref, target_user_id, damage)
+    
+    # 5. Report
+    await update.message.reply_text(
+        f"⚡ **ADMIN SMITE** ⚡\n"
+        f"Dealt `{damage:,}` damage to Boss.\n"
+        f"Credited to: **{target_name}**\n"
+        f"Boss HP: `{new_hp:,}`"
+    )
+    
+    # Check for Death
+    if new_hp <= 0:
+        boss_ref.update({"is_active": False})
+        await update.message.reply_text("💀 **The World Boss has been SLAIN by Admin Force!**")
+        
+
 @admin_only
 async def set_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manually sets a user's total XP."""
@@ -5950,6 +6034,7 @@ async def main():
     app.add_handler(CommandHandler("guild_mission_start", guild_mission_start))
     app.add_handler(CommandHandler("create_npc", create_npc))
     app.add_handler(CommandHandler("npc_action", npc_action))
+    app.add_handler(CommandHandler("deal_damage", admin_deal_damage))
 
     # Message and Callback Handlers
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -5987,6 +6072,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
