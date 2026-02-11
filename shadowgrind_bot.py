@@ -6,7 +6,7 @@
 import os
 import random
 import asyncio
-import colorsys
+import colorsysdef
 import textwrap
 import io
 import traceback
@@ -2875,13 +2875,19 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# Helper function to prevent crashes
+def escape_markdown(text):
+    """Escapes special characters for Telegram Markdown."""
+    if not text: return ""
+    # Escape: _ * ` [
+    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard properly sorted by Rank Value (S > E)."""
+    """Displays the server-wide leaderboard properly sorted (S > E) and Crash-Proof."""
     message = update.effective_message
     
-    # --- 1. DEFINE RANK VALUES (The Fix) ---
-    # We assign points to ranks so the bot knows S is better than E.
+    # --- 1. DEFINE RANK VALUES ---
     RANK_WEIGHTS = {
         "Monarch": 1000,
         "S": 100,
@@ -2893,13 +2899,11 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     # --- 2. FETCH ALL USERS ---
-    # We grab everyone. We do NOT filter by 'if rank exists' to ensure newbies show up too.
     all_users = []
     users_ref = db.collection("users").stream()
     
     for doc in users_ref:
         data = doc.to_dict()
-        # Only include valid docs that have a name
         if data.get("username") or data.get("player_name"):
             all_users.append(data)
 
@@ -2907,33 +2911,28 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("No Hunters have been registered yet.")
         return
 
-    # --- 3. SORTING LOGIC (Corrected) ---
+    # --- 3. SORTING LOGIC ---
     def get_sort_key(u):
-        # Get rank string (default to E)
         rank_str = u.get("rank", "E")
-        # Get numerical weight (default to 50 for E)
         rank_val = RANK_WEIGHTS.get(rank_str, 0)
-        # Get level (default to 1)
         level_val = u.get("level", 1)
-        
-        # Return tuple: (Rank Value, Level)
         return (rank_val, level_val)
 
-    # Sort High to Low (Reverse=True)
     sorted_users = sorted(all_users, key=get_sort_key, reverse=True)
     
     # --- 4. DISPLAY ---
-    # We display the top 10.
     top_hunter = sorted_users[0]
     
-    # Optional: Send Banner for #1
+    # Banner Logic (Optional)
     try:
         banner_path = generate_leaderboard_banner(top_hunter)
         if banner_path and os.path.exists(banner_path):
             with open(banner_path, "rb") as photo:
-                # Add caption for the #1 Player
                 top_badges = get_badge_display(top_hunter, mode="inline")
-                top_name = top_hunter.get("player_name", top_hunter.get("username", "Unknown"))
+                
+                # ESCAPE NAME HERE TOO
+                top_name = escape_markdown(top_hunter.get("player_name", top_hunter.get("username", "Unknown")))
+                
                 caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{top_name}**"
                 await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
                 if os.path.exists(banner_path): os.remove(banner_path)
@@ -2941,16 +2940,19 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Banner skipped: {e}")
 
     # Build List Text
-    # We iterate from 0 to 10 so EVERYONE shows up (even the #1 guy again in the list)
     leaderboard_text = "🏆 **Shadow Hunter Leaderboard** 🏆\n\n"
     
     for i, user in enumerate(sorted_users[:10], 1):
-        name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
+        # Get Name
+        raw_name = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
+        
+        # [CRITICAL FIX] Escape the name so underscores/stars don't crash the bot
+        name_display = escape_markdown(raw_name)
+        
         badges = get_badge_display(user, mode="inline")
         rank = user.get("rank", "E")
         level = user.get("level", 1)
         
-        # Highlight the top 3 with special icons
         medal = "🔹"
         if i == 1: medal = "🥇"
         elif i == 2: medal = "🥈"
@@ -6517,6 +6519,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
