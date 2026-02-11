@@ -2884,81 +2884,55 @@ def escape_markdown(text):
 
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard properly sorted (S > E) and Crash-Proof."""
+    """Displays the server-wide leaderboard using Player Names."""
+    # 1. Safety Fix: Use effective_message to prevent crashes on edits
     message = update.effective_message
     
-    # --- 1. DEFINE RANK VALUES ---
-    RANK_WEIGHTS = {
-        "Monarch": 1000,
-        "S": 100,
-        "A": 90,
-        "B": 80,
-        "C": 70,
-        "D": 60,
-        "E": 50
-    }
-    
-    # --- 2. FETCH ALL USERS ---
-    all_users = []
-    users_ref = db.collection("users").stream()
-    
-    for doc in users_ref:
-        data = doc.to_dict()
-        if data.get("username") or data.get("player_name"):
-            all_users.append(data)
+    # [YOUR ORIGINAL LOGIC] Collect and Sort
+    all_users = [doc.to_dict() for doc in db.collection("users").stream() if doc.to_dict().get("rank")]
+    sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u["rank"]), -u["level"]))
 
-    if not all_users:
-        await message.reply_text("No Hunters have been registered yet.")
+    if not sorted_users:
+        await message.reply_text("No Hunters have been registered yet. Be the first!")
         return
 
-    # --- 3. SORTING LOGIC ---
-    def get_sort_key(u):
-        rank_str = u.get("rank", "E")
-        rank_val = RANK_WEIGHTS.get(rank_str, 0)
-        level_val = u.get("level", 1)
-        return (rank_val, level_val)
-
-    sorted_users = sorted(all_users, key=get_sort_key, reverse=True)
-    
-    # --- 4. DISPLAY ---
     top_hunter = sorted_users[0]
     
-    # Banner Logic (Optional)
+    # Generate Banner
+    banner_path = generate_leaderboard_banner(top_hunter)
     try:
-        banner_path = generate_leaderboard_banner(top_hunter)
-        if banner_path and os.path.exists(banner_path):
-            with open(banner_path, "rb") as photo:
-                top_badges = get_badge_display(top_hunter, mode="inline")
-                
-                # ESCAPE NAME HERE TOO
-                top_name = escape_markdown(top_hunter.get("player_name", top_hunter.get("username", "Unknown")))
-                
-                caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{top_name}**"
-                await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
-                if os.path.exists(banner_path): os.remove(banner_path)
+        with open(banner_path, "rb") as photo:
+            # [UPDATE] Add Badges to Banner Caption
+            top_badges = get_badge_display(top_hunter, mode="inline")
+            
+            # [CRITICAL FIX] Escape the name to prevent the crash you just had
+            raw_name = top_hunter.get("player_name") or top_hunter.get("username", "Unknown")
+            safe_top_name = raw_name.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+            
+            caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{safe_top_name}**"
+            await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        print(f"Banner skipped: {e}")
+        print(f"Banner error: {e}")
+    finally:
+        if os.path.exists(banner_path):
+            os.remove(banner_path)
 
-    # Build List Text
     leaderboard_text = "🏆 **Shadow Hunter Leaderboard** 🏆\n\n"
     
-    for i, user in enumerate(sorted_users[:10], 1):
-        # Get Name
-        raw_name = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
+    # 2. Name Fix: Iterate and prioritize 'player_name'
+    for i, user in enumerate(sorted_users[1:10], 2):
+        # Logic: Try player_name -> Try username -> Default to "Unknown"
+        raw_name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
         
-        # [CRITICAL FIX] Escape the name so underscores/stars don't crash the bot
-        name_display = escape_markdown(raw_name)
+        # [CRITICAL FIX] Escape special characters so the bot doesn't crash on names like "Elite_EconomiX"
+        name_display = raw_name_display.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
         
+        # [UPDATE] Get Badges here
         badges = get_badge_display(user, mode="inline")
-        rank = user.get("rank", "E")
-        level = user.get("level", 1)
         
-        medal = "🔹"
-        if i == 1: medal = "🥇"
-        elif i == 2: medal = "🥈"
-        elif i == 3: medal = "🥉"
-        
-        leaderboard_text += f"{medal} {i}. {badges}**{name_display}**\n      Rank **{rank}** • Level {level}\n"
+        # If it's a player name (no @), make it bold.
+        # [UPDATE] Added {badges} before the name
+        leaderboard_text += f"{i}. {badges}**{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
         
     await message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
 # --- ECONOMY & BLACK MARKET ---
@@ -6519,6 +6493,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
