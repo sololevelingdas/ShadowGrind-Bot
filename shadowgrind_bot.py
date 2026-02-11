@@ -2875,20 +2875,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-# Helper function to prevent crashes
-def escape_markdown(text):
-    """Escapes special characters for Telegram Markdown."""
-    if not text: return ""
-    # Escape: _ * ` [
-    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
 
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard using Player Names."""
+    """Displays the server-wide leaderboard using Player Names and Badges."""
     # 1. Safety Fix: Use effective_message to prevent crashes on edits
     message = update.effective_message
     
-    # [YOUR ORIGINAL LOGIC] Collect and Sort
     all_users = [doc.to_dict() for doc in db.collection("users").stream() if doc.to_dict().get("rank")]
     sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u["rank"]), -u["level"]))
 
@@ -2898,19 +2892,11 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     top_hunter = sorted_users[0]
     
-    # Generate Banner
+    # Generate Banner (Passes the full user dict, so ensure your banner logic checks player_name too if needed)
     banner_path = generate_leaderboard_banner(top_hunter)
     try:
         with open(banner_path, "rb") as photo:
-            # [UPDATE] Add Badges to Banner Caption
-            top_badges = get_badge_display(top_hunter, mode="inline")
-            
-            # [CRITICAL FIX] Escape the name to prevent the crash you just had
-            raw_name = top_hunter.get("player_name") or top_hunter.get("username", "Unknown")
-            safe_top_name = raw_name.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-            
-            caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{safe_top_name}**"
-            await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
+            await message.reply_photo(photo=photo)
     except Exception as e:
         print(f"Banner error: {e}")
     finally:
@@ -2922,17 +2908,16 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. Name Fix: Iterate and prioritize 'player_name'
     for i, user in enumerate(sorted_users[1:10], 2):
         # Logic: Try player_name -> Try username -> Default to "Unknown"
-        raw_name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
+        name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
         
-        # [CRITICAL FIX] Escape special characters so the bot doesn't crash on names like "Elite_EconomiX"
-        name_display = raw_name_display.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+        # Badge Logic: Fetch badges, default to empty string if none exist
+        badges = user.get("badges", "")
+        # If badges is a list, join them; otherwise keep as string
+        if isinstance(badges, list):
+            badges = " ".join(badges)
         
-        # [UPDATE] Get Badges here
-        badges = get_badge_display(user, mode="inline")
-        
-        # If it's a player name (no @), make it bold.
-        # [UPDATE] Added {badges} before the name
-        leaderboard_text += f"{i}. {badges}**{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
+        # This creates: "2. **Hyper** 🛡️ - Rank E..."
+        leaderboard_text += f"{i}. **{name_display}** {badges} - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
         
     await message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
 # --- ECONOMY & BLACK MARKET ---
@@ -6493,6 +6478,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
