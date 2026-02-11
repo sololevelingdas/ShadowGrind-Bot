@@ -6,7 +6,7 @@
 import os
 import random
 import asyncio
-import colorsysdef
+import colorsys
 import textwrap
 import io
 import traceback
@@ -6478,6 +6478,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
