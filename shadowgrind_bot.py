@@ -4908,23 +4908,32 @@ async def player_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🔍 **Scanning Archives for Agent: {target_name}...**")
 
-    # 2. Query Logs for THIS specific User ID
-    # We filter by 'user_id' matching the target
+    # 2. Query Logs (SAFE VERSION)
+    # We remove .order_by() from the database query to fix the Index Error.
+    # We fetch the last 20 logs loosely and sort them in Python instead.
     logs_ref = db.collection("mission_logs")
-    query = logs_ref.where(filter=FieldFilter("user_id", "==", target_id)) \
-                    .order_by("completed_at", direction=firestore.Query.DESCENDING) \
-                    .limit(3) # Fetches last 3
+    query = logs_ref.where(filter=FieldFilter("user_id", "==", target_id)).limit(20)
     
-    results = list(query.stream())
-
-    if not results:
+    # Execute query
+    unsorted_results = [doc.to_dict() for doc in query.stream()]
+    
+    if not unsorted_results:
         await update.message.reply_text(f"📉 No mission history found for **{target_name}**.")
         return
 
-    # 3. Display Results
-    for doc in results:
-        data = doc.to_dict()
-        
+    # 3. Sort Results in Python (Newest First)
+    def get_sort_key(d):
+        ts = d.get("completed_at")
+        # Handle Firestore Timestamp, datetime, or missing data
+        if hasattr(ts, 'timestamp'): return ts.timestamp()
+        if hasattr(ts, 'to_pydatetime'): return ts.to_pydatetime().timestamp()
+        return 0
+
+    # Sort descending and take top 3
+    results_sorted = sorted(unsorted_results, key=get_sort_key, reverse=True)[:3]
+
+    # 4. Display Results
+    for data in results_sorted:
         # Extract Data
         mission = data.get('mission_title', 'Unknown Mission')
         xp = data.get('xp_earned', 0)
@@ -4938,6 +4947,8 @@ async def player_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dt = completed_at
             # If it's a Firestore Timestamp object, convert to datetime first
             if hasattr(dt, 'replace'): 
+                # Convert to local time if possible, or just keep as UTC
+                if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
                 date_str = dt.strftime("%d-%b %H:%M")
         
         proof_type = data.get('proof_type', 'log')
@@ -4963,7 +4974,6 @@ async def player_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Text log
             await update.message.reply_text(f"{msg}\n`{proof_content}`", parse_mode=ParseMode.MARKDOWN)
-
 
 import uuid # Add this to your imports at the top
 
@@ -6475,6 +6485,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
