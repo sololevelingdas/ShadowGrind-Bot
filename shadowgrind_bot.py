@@ -2877,56 +2877,88 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_active_status
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the server-wide leaderboard using Player Names and Badges."""
-    # 1. Safety Fix: Use effective_message to prevent crashes on edits
+    """Displays the server-wide leaderboard properly sorted by Rank Value (S > E)."""
     message = update.effective_message
     
-    # Fetch all users who have a rank
-    all_users = [doc.to_dict() for doc in db.collection("users").stream() if doc.to_dict().get("rank")]
+    # --- 1. DEFINE RANK VALUES (The Fix) ---
+    # We assign points to ranks so the bot knows S is better than E.
+    RANK_WEIGHTS = {
+        "Monarch": 1000,
+        "S": 100,
+        "A": 90,
+        "B": 80,
+        "C": 70,
+        "D": 60,
+        "E": 50
+    }
     
-    # Sort by Rank (High to Low) then by Level (High to Low)
-    # Assumes get_rank_sort_value helper exists in your code
-    sorted_users = sorted(all_users, key=lambda u: (get_rank_sort_value(u.get("rank", "E")), u.get("level", 1)), reverse=True)
+    # --- 2. FETCH ALL USERS ---
+    # We grab everyone. We do NOT filter by 'if rank exists' to ensure newbies show up too.
+    all_users = []
+    users_ref = db.collection("users").stream()
+    
+    for doc in users_ref:
+        data = doc.to_dict()
+        # Only include valid docs that have a name
+        if data.get("username") or data.get("player_name"):
+            all_users.append(data)
 
-    if not sorted_users:
-        await message.reply_text("No Hunters have been registered yet. Be the first!")
+    if not all_users:
+        await message.reply_text("No Hunters have been registered yet.")
         return
 
+    # --- 3. SORTING LOGIC (Corrected) ---
+    def get_sort_key(u):
+        # Get rank string (default to E)
+        rank_str = u.get("rank", "E")
+        # Get numerical weight (default to 50 for E)
+        rank_val = RANK_WEIGHTS.get(rank_str, 0)
+        # Get level (default to 1)
+        level_val = u.get("level", 1)
+        
+        # Return tuple: (Rank Value, Level)
+        return (rank_val, level_val)
+
+    # Sort High to Low (Reverse=True)
+    sorted_users = sorted(all_users, key=get_sort_key, reverse=True)
+    
+    # --- 4. DISPLAY ---
+    # We display the top 10.
     top_hunter = sorted_users[0]
     
-    # Generate Banner for the #1 Player
-    banner_path = None
+    # Optional: Send Banner for #1
     try:
         banner_path = generate_leaderboard_banner(top_hunter)
         if banner_path and os.path.exists(banner_path):
             with open(banner_path, "rb") as photo:
-                # We can add a caption to the banner if we want
+                # Add caption for the #1 Player
                 top_badges = get_badge_display(top_hunter, mode="inline")
                 top_name = top_hunter.get("player_name", top_hunter.get("username", "Unknown"))
                 caption = f"🏆 **#1 SUPREME HUNTER**\n{top_badges}**{top_name}**"
                 await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.MARKDOWN)
+                if os.path.exists(banner_path): os.remove(banner_path)
     except Exception as e:
-        print(f"Banner error: {e}")
-    finally:
-        if banner_path and os.path.exists(banner_path):
-            os.remove(banner_path)
+        print(f"Banner skipped: {e}")
 
+    # Build List Text
+    # We iterate from 0 to 10 so EVERYONE shows up (even the #1 guy again in the list)
     leaderboard_text = "🏆 **Shadow Hunter Leaderboard** 🏆\n\n"
     
-    # 2. Iterate through the rest (2 to 10)
-    for i, user in enumerate(sorted_users[1:10], 2):
-        # Logic: Try player_name -> Try username -> Default to "Unknown"
+    for i, user in enumerate(sorted_users[:10], 1):
         name_display = user.get("player_name") or f"@{user.get('username', 'Unknown')}"
-        
-        # [NEW] GET BADGES (Inline Mode)
-        # Returns string like "👑⚜️ "
         badges = get_badge_display(user, mode="inline")
+        rank = user.get("rank", "E")
+        level = user.get("level", 1)
         
-        # Format: 2. 👑 **Hyper** - Rank E (Level 5)
-        leaderboard_text += f"{i}. {badges}**{name_display}** - Rank **{user.get('rank', 'E')}** (Level {user.get('level', 1)})\n"
+        # Highlight the top 3 with special icons
+        medal = "🔹"
+        if i == 1: medal = "🥇"
+        elif i == 2: medal = "🥈"
+        elif i == 3: medal = "🥉"
+        
+        leaderboard_text += f"{medal} {i}. {badges}**{name_display}**\n      Rank **{rank}** • Level {level}\n"
         
     await message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
-
 # --- ECONOMY & BLACK MARKET ---
 
 # (Replace your existing 'blackmarket' function with this)
@@ -6485,6 +6517,7 @@ if __name__ == "__main__":
     keep_alive() # Starts the web server for Render
 
     asyncio.run(main())
+
 
 
 
